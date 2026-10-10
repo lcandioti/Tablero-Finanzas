@@ -210,6 +210,11 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     </div>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="Secciones" id="tabs">
+    <button class="tab" role="tab" type="button" data-view="fin" aria-selected="true" aria-controls="main">Finanzas</button>
+    <button class="tab" role="tab" type="button" data-view="alu" aria-selected="false" aria-controls="view-alu">Análisis Alumnos</button>
+  </nav>
+
   <div id="notice" hidden></div>
 
   <form class="notice keybox" id="keybox" hidden>
@@ -291,6 +296,18 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   </section>
   </div>
 
+  <div class="view" id="view-alu" role="tabpanel" hidden>
+  <section class="panel" aria-labelledby="h-saldo" id="saldo-panel" hidden>
+    <div class="phead"><h2 id="h-saldo">Saldo de horas por alumno</h2>
+      <div class="mhead"><label class="mfilter"><span class="flabel">Mostrar</span>
+        <select class="sel" id="f-saldo"><option value="pos">Saldo a favor</option><option value="neg">Voló más de lo pagado</option><option value="all">Todos</option></select></label></div>
+    </div>
+    <div class="kpis" id="saldo-kpis"></div>
+    <div class="tbl" id="saldo-tbl"></div>
+    <p class="sub" id="saldo-note" style="margin:0"></p>
+  </section>
+  </div>
+
   <footer>Datos leídos de las pestañas «Ingresos» y «Egresos» de la planilla Registro - Génesis Aviación. Cotizaciones del dólar: ArgentinaDatos (api.argentinadatos.com), valor de venta del día de cada movimiento.</footer>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -305,7 +322,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   var AC_ORDER = ["IQB","S091","FPJ","CMD","Simulador"];
   var AC_VAR = {IQB:"--s1",S091:"--s2",FPJ:"--s3",CMD:"--s4",Simulador:"--s5"};
 
-  var state = { movs: null, period: "12m", from: "", to: "", cur: "ARS", casa: "blue", ac: {}, tipo: "", showTable: false, rates: {}, ratesErr: {} };
+  var state = { saldo: null, saldoVer: "pos", saldoAll: false, movs: null, period: "12m", from: "", to: "", cur: "ARS", casa: "blue", ac: {}, tipo: "", showTable: false, rates: {}, ratesErr: {} };
   try {
     var sv = JSON.parse(localStorage.getItem(PREFS) || "{}");
     ["period","from","to","cur","casa"].forEach(function(k){ if (sv[k]) state[k] = sv[k]; });
@@ -601,6 +618,41 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       (b.length > 40 ? '<p class="sub">Se muestran las 40 más recientes.</p>' : '');
   }
 
+  // ---------- Saldo de horas (lo calcula Apps Script en la pestaña «Saldo horas») ----------
+  // fila: [alumno, C150 pagadas, C150 voladas, C150 saldo, S091 pagadas, S091 voladas, S091 saldo, último pago, último vuelo, previsión USD, observaciones]
+  function fmtHs(v){ v = Number(v) || 0; if (!v) return '—'; return (v > 0 ? '+' : '−') + Math.abs(v).toLocaleString("es-AR",{minimumFractionDigits:1, maximumFractionDigits:1}); }
+  function usd(v){ return "US$ " + fmtInt(v); }
+  function renderSaldo(){
+    var s = state.saldo, panel = $("saldo-panel");
+    if (!s || !s.rows){ panel.hidden = true; return; }
+    panel.hidden = false;
+    var rows = s.rows, hC = 0, hS = 0, nPos = 0, hNeg = 0, nNeg = 0;
+    rows.forEach(function(r){
+      var c = Number(r[3]) || 0, x = Number(r[6]) || 0;
+      if (c > 0) hC += c; if (x > 0) hS += x;
+      if (c > 0 || x > 0) nPos++;
+      if (c < 0 || x < 0){ nNeg++; hNeg += Math.min(0, c) + Math.min(0, x); }
+    });
+    function k(t, v, d, cls){ return '<div class="kpi"><span class="k">'+esc(t)+'</span><span class="v num'+(cls?' '+cls:'')+'">'+v+'</span><span class="d">'+d+'</span></div>'; }
+    $("saldo-kpis").innerHTML =
+      k("Previsión", usd(s.total), "Horas a favor × US$ "+fmtInt(s.c150)+"/h C150 · US$ "+fmtInt(s.s091)+"/h S091") +
+      k("A favor en C150", fmtInt(hC) + '<small>h</small>', "IQB + FPJ") +
+      k("A favor en S091", fmtInt(hS) + '<small>h</small>', fmtInt(nPos) + " alumnos con saldo a favor") +
+      k("Voló más de lo pagado", fmtInt(-hNeg) + '<small>h</small>', fmtInt(nNeg) + " personas (incluye instructores y pagos anteriores al " + esc(s.desde) + ")");
+    var ver = state.saldoVer, list = rows.filter(function(r){
+      var c = Number(r[3]) || 0, x = Number(r[6]) || 0;
+      return ver === "all" ? (c || x) : ver === "pos" ? (c > 0 || x > 0) : (c < 0 || x < 0);
+    });
+    if (ver === "neg") list.sort(function(a,b){ return ((+a[3]||0) + (+a[6]||0)) - ((+b[3]||0) + (+b[6]||0)); });
+    var total = list.length, show = state.saldoAll ? list : list.slice(0, 25);
+    $("saldo-tbl").innerHTML = total ? '<table><thead><tr><th>Alumno / piloto</th><th class="r">Saldo C150</th><th class="r">Saldo S091</th><th class="r">Previsión</th><th>Último pago</th><th>Último vuelo</th><th>Observaciones</th></tr></thead><tbody>' +
+      show.map(function(r){
+        var c = Number(r[3]) || 0, x = Number(r[6]) || 0;
+        return '<tr><td>'+esc(r[0])+'</td><td class="r '+(c>0?'up':c<0?'down':'')+'" title="Pagó '+esc(r[1])+' h · voló '+esc(r[2])+' h">'+fmtHs(c)+'</td><td class="r '+(x>0?'up':x<0?'down':'')+'" title="Pagó '+esc(r[4])+' h · voló '+esc(r[5])+' h">'+fmtHs(x)+'</td><td class="r"><b>'+(r[9] ? usd(r[9]) : '—')+'</b></td><td class="num">'+esc(r[7] || '—')+'</td><td class="num">'+esc(r[8] || '—')+'</td><td class="wrapc sub">'+esc(r[10] || '')+'</td></tr>';
+      }).join("") + '</tbody></table>' + (total > 25 ? '<p style="margin:8px 0 0"><button class="link" type="button" id="saldo-more">'+(state.saldoAll ? 'Ver solo los primeros 25' : 'Ver todos ('+total+')')+'</button></p>' : '') : '<p class="sub">Nadie en esta categoría.</p>';
+    $("saldo-note").innerHTML = 'Calculado al día de hoy. Saldo = horas pagadas (Ingresos) − horas voladas (Vuelo) desde el '+esc(s.desde)+'. El detalle completo está en la pestaña «Saldo horas» de la planilla, donde también se cambian los costos por hora.';
+  }
+
   function render(){
     if (!state.movs) return;
     if (state.cur === "UNI") loadRates(state.casa);
@@ -609,7 +661,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     renderKpis(list); renderChart(list);
     rank(list, "egr", "cat", $("rubros"), 12, "var(--s1)");
     rank(list, "ing", "cat", $("conceptos"), 8, "var(--ink-ing)");
-    renderFormas(list); renderAviones(list); renderLast(list); renderRev();
+    renderFormas(list); renderAviones(list); renderSaldo(); renderLast(list); renderRev();
     $("month-table").hidden = !state.showTable;
     $("toggle-table").textContent = state.showTable ? "Ocultar tabla" : "Ver como tabla";
   }
@@ -622,12 +674,23 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       savePrefs(); render(); }
     if (a){ var k = a.getAttribute("data-ac"); state.ac[k] = !state.ac[k]; render(); }
     if (c){ state.cur = c.getAttribute("data-cur"); savePrefs(); render(); }
+    var v = e.target.closest("[data-view]"); if (v) setView(v.getAttribute("data-view"), true);
   });
+  function setView(v, push){
+    state.view = v === "alu" ? "alu" : "fin";
+    $("main").hidden = state.view !== "fin";
+    $("view-alu").hidden = state.view !== "alu";
+    document.querySelectorAll("[data-view]").forEach(function(b){ b.setAttribute("aria-selected", String(b.getAttribute("data-view") === state.view)); });
+    if (push){ try { history.replaceState(null, "", state.view === "alu" ? "#alumnos" : location.pathname + location.search); } catch(x) {} }
+    if (state.view === "fin") render();
+  }
   function onCustom(){ state.from = $("f-from").value; state.to = $("f-to").value; savePrefs(); render(); }
   $("f-from").addEventListener("change", onCustom);
   $("f-to").addEventListener("change", onCustom);
   $("f-casa").addEventListener("change", function(e){ state.casa = e.target.value; savePrefs(); render(); });
   $("f-tipo").addEventListener("change", function(e){ state.tipo = e.target.value; renderLast(filtered(false)); });
+  $("f-saldo").addEventListener("change", function(e){ state.saldoVer = e.target.value; state.saldoAll = false; renderSaldo(); });
+  document.addEventListener("click", function(e){ if (e.target.id === "saldo-more"){ state.saldoAll = !state.saldoAll; renderSaldo(); } });
   $("toggle-table").addEventListener("click", function(){ state.showTable = !state.showTable; render(); });
   var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt = setTimeout(render, 150); });
 
@@ -640,19 +703,22 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     try { return localStorage.getItem(KEYS) || ""; } catch(e) { return ""; }
   }
   var KEY = getKey();
+  state.view = /alumnos/i.test(location.hash) ? "alu" : "fin";
+  window.addEventListener("hashchange", function(){ if (/alumnos/i.test(location.hash)) setView("alu"); });
   function askKey(msg){
-    $("main").hidden = true; $("keybox").hidden = false;
+    $("main").hidden = true; $("view-alu").hidden = true; $("tabs").hidden = true; $("keybox").hidden = false;
     setStatus("warn", msg || "Falta la clave de acceso");
     $("keyin").focus();
   }
   $("keybox").addEventListener("submit", function(e){
     e.preventDefault(); KEY = $("keyin").value.trim(); if (!KEY) return;
     try { localStorage.setItem(KEYS, KEY); } catch(x) {}
-    $("keybox").hidden = true; $("main").hidden = false; setStatus("", "Conectando con la planilla…"); load(false);
+    $("keybox").hidden = true; $("tabs").hidden = false; setView(state.view); setStatus("", "Conectando con la planilla…"); load(false);
   });
   function apply(d){
     if (!d || !d.ing) return false;
     state.movs = buildMovs(d);
+    state.saldo = d.saldo || null;
     setStatus("live", "Datos de la planilla · " + new Date(d.ts || Date.now()).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}) + " · " + fmtInt(state.movs.length) + " movimientos");
     $("notice").hidden = true;
     render(); return true;
@@ -678,6 +744,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   $("kpis").innerHTML = [1,2,3,4].map(function(){ return '<div class="kpi"><span class="k">Cargando</span><div class="skel" style="width:60%;height:30px;margin-top:6px"></div><div class="skel" style="width:80%;margin-top:6px"></div></div>'; }).join("");
   $("chart").innerHTML = '<div class="skel" style="height:280px"></div>';
   if (KEY){
+    setView(state.view);
     try { apply(JSON.parse(localStorage.getItem(STORE) || "null")); } catch(e) {}
     load(false);
   } else askKey();
