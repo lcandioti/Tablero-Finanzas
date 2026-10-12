@@ -174,6 +174,7 @@ td.item{white-space:normal;min-width:10rem}
 td.item .obs{display:block;font-size:.76rem;color:var(--muted)}
 td.big{font-weight:600}
 @media (prefers-reduced-motion:no-preference){.seg{transition:opacity .15s}}
+.chip-mes{font:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--grid);border-radius:999px;padding:2px 10px;cursor:pointer;text-transform:capitalize}.chip-mes:hover{border-color:var(--fg)}.chip-mes span{color:var(--muted);margin-left:4px}
 
 /* Finanzas */
 :root{--ink-ing:#55534f}
@@ -260,19 +261,19 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       <div class="legend" id="legend"></div>
     </div>
     <div class="chartbox" id="chart"></div>
-    <div><button class="link" id="toggle-table" type="button">Ver como tabla</button></div>
+    <div><button class="link" id="toggle-table" type="button">Ver como tabla</button> <span class="sub" style="margin-left:10px">Tocá un mes para ver sus rubros y conceptos</span></div>
     <div class="tbl" id="month-table" hidden></div>
   </section>
 
   <div class="cols">
     <section class="panel" aria-labelledby="h-rub">
-      <div class="phead"><h2 id="h-rub">Egresos por rubro</h2><span class="sub">En el período</span></div>
+      <div class="phead"><h2 id="h-rub">Egresos por rubro</h2><span class="sub selmes">En el período</span></div>
       <div class="hbars" id="rubros"></div>
     </section>
     <section class="panel" aria-labelledby="h-con">
-      <div class="phead"><h2 id="h-con">Ingresos por concepto</h2><span class="sub">En el período</span></div>
+      <div class="phead"><h2 id="h-con">Ingresos por concepto</h2><span class="sub selmes">En el período</span></div>
       <div class="hbars" id="conceptos"></div>
-      <div class="phead" style="margin-top:6px"><h2>Forma de pago</h2><span class="sub">Ingresos · egresos</span></div>
+      <div class="phead" style="margin-top:6px"><h2>Forma de pago</h2><span class="sub selmes" data-base="Ingresos · egresos">Ingresos · egresos</span></div>
       <div class="tbl" id="formas"></div>
     </section>
   </div>
@@ -539,13 +540,16 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       pts.push([cx, y(res[i])]);
       if (i % every === 0 || i === ks.length-1)
         s += '<text x="'+cx+'" y="'+(H-m.b+16)+'" text-anchor="middle" font-size="11" fill="var(--'+(i===ks.length-1?'fg':'muted')+')" font-family="var(--f-mono)">'+monthLabel(k)+'</text>';
-      hits += '<rect class="hit" data-i="'+i+'" x="'+(m.l+bw*i)+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/>';
+      if (state.selMes === k) s = s.replace('<line', '<rect x="'+(m.l+bw*i+2)+'" y="'+m.t+'" width="'+(bw-4)+'" height="'+ih+'" rx="4" fill="var(--fg)" opacity=".07"/><line');
+      hits += '<rect class="hit" data-i="'+i+'" style="cursor:pointer" x="'+(m.l+bw*i)+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/>';
     });
     s += '<polyline points="'+pts.map(function(p){ return p[0]+','+p[1]; }).join(' ')+'" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" opacity=".8"/>';
     s += '<polyline points="'+pts.map(function(p){ return p[0]+','+p[1]; }).join(' ')+'" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round"/>';
     pts.forEach(function(p, i){ s += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="3.5" fill="var(--surface)" stroke="'+(res[i] >= 0 ? 'var(--fg)' : 'var(--down)')+'" stroke-width="2"/>'; });
     s += hits + '</svg>';
     box.innerHTML = s;
+    function dimSel(){ box.querySelectorAll(".seg").forEach(function(sg){ sg.style.opacity = (!state.selMes || +sg.getAttribute("data-k") === state.selMes) ? "1" : ".35"; }); }
+    dimSel();
     if (box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
     var tip = $("tip");
     box.querySelectorAll(".hit").forEach(function(el){
@@ -559,7 +563,8 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
         if (ty + tip.offsetHeight > window.innerHeight) ty = ev.clientY - tip.offsetHeight - 10;
         tip.style.left = tx + "px"; tip.style.top = ty + "px";
       });
-      el.addEventListener("pointerleave", function(){ tip.hidden = true; box.querySelectorAll(".seg").forEach(function(sg){ sg.style.opacity = "1"; }); });
+      el.addEventListener("pointerleave", function(){ tip.hidden = true; dimSel(); });
+      el.addEventListener("click", function(){ var k = ks[+el.getAttribute("data-i")]; state.selMes = state.selMes === k ? null : k; tip.hidden = true; render(); });
     });
     var t = '<table><thead><tr><th>Mes</th><th class="r">Ingresos</th><th class="r">Egresos</th><th class="r">Resultado</th><th class="r">Margen</th></tr></thead><tbody>';
     ks.slice().reverse().forEach(function(k){ var d = data[k], r = d.ing - d.egr;
@@ -658,10 +663,17 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     if (state.cur === "UNI") loadRates(state.casa);
     renderFilters(); curNote();
     var list = filtered(false);
+    if (state.selMes && !list.some(function(x){ return monthKey(x.m.date) === state.selMes; })) state.selMes = null;
     renderKpis(list); renderChart(list);
-    rank(list, "egr", "cat", $("rubros"), 12, "var(--s1)");
-    rank(list, "ing", "cat", $("conceptos"), 8, "var(--ink-ing)");
-    renderFormas(list); renderAviones(list); renderSaldo(); renderLast(list); renderRev();
+    // Al tocar un mes del gráfico, los rankings y formas de pago muestran solo ese mes
+    var sel = state.selMes, lm = sel ? list.filter(function(x){ return monthKey(x.m.date) === sel; }) : list;
+    document.querySelectorAll(".selmes").forEach(function(e){
+      var base = e.getAttribute("data-base") || "En el período";
+      e.innerHTML = sel ? '<button class="chip-mes" type="button" data-clear-mes title="Volver a todo el período">'+MESES_L[sel%100]+' '+Math.floor(sel/100)+' <span aria-hidden="true">✕</span></button>' : esc(base);
+    });
+    rank(lm, "egr", "cat", $("rubros"), 12, "var(--s1)");
+    rank(lm, "ing", "cat", $("conceptos"), 8, "var(--ink-ing)");
+    renderFormas(lm); renderAviones(list); renderSaldo(); renderLast(list); renderRev();
     $("month-table").hidden = !state.showTable;
     $("toggle-table").textContent = state.showTable ? "Ocultar tabla" : "Ver como tabla";
   }
@@ -674,6 +686,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       savePrefs(); render(); }
     if (a){ var k = a.getAttribute("data-ac"); state.ac[k] = !state.ac[k]; render(); }
     if (c){ state.cur = c.getAttribute("data-cur"); savePrefs(); render(); }
+    if (e.target.closest("[data-clear-mes]")){ state.selMes = null; render(); }
     var v = e.target.closest("[data-view]"); if (v) setView(v.getAttribute("data-view"), true);
   });
   function setView(v, push){
