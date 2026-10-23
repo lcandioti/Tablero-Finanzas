@@ -120,6 +120,8 @@ select.sel{border:1px solid var(--line);background:var(--surface);border-radius:
 .alu-sum b{font-size:1.15rem}
 .alu-tbl{max-height:520px;overflow:auto;margin-top:8px}
 .alu-tbl thead th{position:sticky;top:0;background:var(--surface);z-index:1}
+.alu-pago td{background:color-mix(in srgb, var(--fg) 4%, transparent)}
+.alu-sum>div .sub{white-space:nowrap}
 .alulink{cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}.alulink:hover{text-decoration-color:var(--fg2)}
 table{border-collapse:collapse;width:100%;font-size:.84rem}
 th{font-family:var(--f-mono);font-weight:500;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--axis);white-space:nowrap}
@@ -289,11 +291,11 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   </div>
 
   <section class="panel" aria-labelledby="h-alu">
-    <div class="phead"><h2 id="h-alu">Pagos por alumno</h2>
+    <div class="phead"><h2 id="h-alu">Pagos y vuelos por alumno</h2>
       <div class="alu-ctl"><label class="mfilter"><span class="flabel">Alumno</span><select class="sel" id="f-alu"><option value="">Elegí un alumno…</option></select></label>
         <button class="btn" id="alu-xls" type="button" disabled>Descargar Excel</button><button class="btn" id="alu-pdf" type="button" disabled>Descargar PDF</button></div>
     </div>
-    <p class="sub" style="margin:0">Todos los ingresos registrados a nombre del alumno, en su moneda original y sin aplicar los filtros de arriba.</p>
+    <p class="sub" style="margin:0">Todos los pagos (en su moneda original) y vuelos del alumno en orden de fecha, con el saldo de horas acumulado. No aplica los filtros de arriba.</p>
     <div id="alu-body"></div>
   </section>
 
@@ -798,7 +800,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     return zip([
       ["[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
       ["_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
-      ["xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+xesc(nombreHoja.slice(0, 31))+'" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+      ["xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+xesc(nombreHoja.slice(0, 31))+'" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'],
       ["xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
       ["xl/worksheets/sheet1.xml", ws],
       ["xl/styles.xml", styles]
@@ -836,80 +838,138 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     var b = new Uint8Array(out.length); for (var i = 0; i < out.length; i++) b[i] = out.charCodeAt(i) & 255;
     return b;
   }
-  // ---------- Pagos por alumno (todos sus ingresos, con descarga a Excel y PDF) ----------
+  // ---------- Pagos por alumno: cuenta corriente de horas (pagos suman, vuelos restan) ----------
+  // Los vuelos vienen de la parte pública del script (?d=datos); los pagos, de Ingresos.
   function h1(v){ return (Math.round(v * 10) / 10).toLocaleString("es-AR", {minimumFractionDigits:1, maximumFractionDigits:1}); }
+  function hs(v){ var r = Math.round(v * 10) / 10; return (r > 0 ? "+" : r < 0 ? "−" : "") + h1(Math.abs(r)); }
+  function hsP(v){ return hs(v).replace("−", "-"); }
   function fecha4(d){ return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear(); }
   function monto(cur, v){ return (cur === "USD" ? "US$ " : "$ ") + fmtInt(v); }
+  var VU_STORE = "gen-fin-vuelos";
+  function loadVuelos(){
+    if (!state.vu){ try { state.vu = JSON.parse(localStorage.getItem(VU_STORE) || "null"); } catch(e) {} }
+    fetch(API + "?d=datos&t=" + Date.now(), { credentials: "omit" })
+      .then(function(r){ if (!r.ok) throw new Error("respuesta " + r.status); return r.json(); })
+      .then(function(j){
+        if (!j || !j.ok || !j.data || !j.data.vuelos) throw new Error("sin vuelos");
+        state.vu = { vuelos: j.data.vuelos, sim: j.data.sim || [], tar: j.data.tar || null, ts: j.data.ts };
+        state.vuErr = null;
+        try { localStorage.setItem(VU_STORE, JSON.stringify(state.vu)); } catch(e) {}
+        state.aluIdx = null; if (state.movs) renderAlumno();
+      })
+      .catch(function(e){ state.vuErr = String(e.message || e); if (state.movs) renderAlumno(); });
+  }
+  function grupoDe(){
+    var by = {}, sim = "Simulador";
+    var av = state.vu && state.vu.tar && state.vu.tar.aviones;
+    (av || []).forEach(function(a){
+      var mats = String(a[1]).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+      mats.forEach(function(m){ by[m] = a[0]; });
+      if (/^sim/i.test(a[0]) || mats.indexOf("SIM") >= 0) sim = a[0];
+    });
+    return function(ac){ var u = String(ac || "").toUpperCase(); if (/^SIM/.test(u)) return sim; return by[u] || ac || "Sin avión"; };
+  }
   function aluIndex(){
     var ing = state.movs.filter(function(m){ return m.kind === "ing" && m.who; });
-    var key = nameIndex(ing.map(function(m){ return m.who; })), A = {};
+    var vu = (state.vu && state.vu.vuelos) || [], sim = (state.vu && state.vu.sim) || [];
+    var key = nameIndex(ing.map(function(m){ return m.who; }).concat(vu.map(function(v){ return v[1]; }), sim.map(function(s){ return s[1]; })));
+    var grupo = grupoDe(), A = {};
     ing.forEach(function(m){
       var k = key(m.who); if (!k) return;
-      var a = A[k] || (A[k] = { k: k, var: {}, f: [], tot: { ARS: 0, USD: 0 }, hs: {} });
-      a.var[m.who] = (a.var[m.who] || 0) + 1; a.f.push(m); a.tot[m.cur] += m.amt;
-      if (m.hours > 0 && m.hours <= 150) a.hs[m.ac] = (a.hs[m.ac] || 0) + m.hours;
+      var a = A[k] || (A[k] = { k: k, var: {}, pagos: [], vuelos: [], tot: { ARS: 0, USD: 0 } });
+      a.var[m.who] = (a.var[m.who] || 0) + 1; a.pagos.push(m); a.tot[m.cur] += m.amt;
+    });
+    // Solo se arma la cuenta de quienes tienen pagos registrados
+    vu.forEach(function(v){
+      var a = A[key(v[1])]; if (!a) return;
+      var d = parseDate(v[0]), h = parseHours(v[6]); if (!d || !(h > 0 && h <= 24)) return;
+      a.vuelos.push({ date: d, ac: String(v[7] || "").toUpperCase() || "Sin avión", inst: clean(v[3]), fin: clean(v[2]).toUpperCase(), h: h });
+    });
+    sim.forEach(function(s){
+      var a = A[key(s[1])]; if (!a) return;
+      var d = parseDate(s[0]), h = parseHours(s[4]); if (!d || !(h > 0 && h <= 12)) return;
+      a.vuelos.push({ date: d, ac: "Simulador", inst: clean(s[3]), fin: clean(s[2]).toUpperCase(), h: h });
     });
     Object.keys(A).forEach(function(k){
       var a = A[k]; a.nombre = Object.keys(a.var).sort(function(x, y){ return a.var[y] - a.var[x]; })[0];
-      a.f.sort(function(x, y){ return x.date - y.date; });
+      var L = a.pagos.map(function(m){ var h = m.hours > 0 && m.hours <= 150 ? m.hours : 0;
+        return { date: m.date, tipo: "Pago", ac: m.ac, g: grupo(m.ac), det: m.cat + " · " + m.forma, cur: m.cur, amt: m.amt, h: h }; })
+        .concat(a.vuelos.map(function(v){ return { date: v.date, tipo: "Vuelo", ac: v.ac, g: grupo(v.ac), det: (v.inst && !/^(n\/?a|-)$/i.test(v.inst) ? v.inst : "Sin instructor") + (v.fin ? " · " + v.fin : ""), cur: "", amt: 0, h: -v.h }; }));
+      L.sort(function(x, y){ return x.date - y.date || (x.tipo === "Pago" ? -1 : 1) - (y.tipo === "Pago" ? -1 : 1); });
+      var s = 0, G = {}; L.forEach(function(e){ s += e.h; e.saldo = s;
+        var g = G[e.g] || (G[e.g] = { pag: 0, vol: 0 }); if (e.h > 0) g.pag += e.h; else g.vol -= e.h; });
+      a.L = L; a.G = G; a.saldo = s;
     });
     state.aluIdx = { key: key, A: A };
     return state.aluIdx;
   }
   function aluTotales(a){
-    var t = []; if (a.tot.ARS) t.push(["Total en pesos", monto("ARS", a.tot.ARS)]); if (a.tot.USD) t.push(["Total en dólares", monto("USD", a.tot.USD)]);
+    var t = []; if (a.tot.ARS) t.push(["Total pagado en pesos", monto("ARS", a.tot.ARS)]); if (a.tot.USD) t.push(["Total pagado en dólares", monto("USD", a.tot.USD)]);
     return t;
   }
-  function aluHoras(a){ var acs = aircraftList(); return acs.concat(Object.keys(a.hs)).filter(function(x, i, l){ return a.hs[x] && l.indexOf(x) === i; }).map(function(x){ return [x, a.hs[x]]; }); }
+  function aluGrupos(a){ return Object.keys(a.G).filter(function(g){ return a.G[g].pag || a.G[g].vol; }).map(function(g){ var o = a.G[g]; return [g, o.pag, o.vol, o.pag - o.vol]; }); }
   function renderAlumno(){
     var ix = state.aluIdx || aluIndex(), A = ix.A;
     var keys = Object.keys(A).sort(function(x, y){ return A[x].nombre.localeCompare(A[y].nombre, "es"); });
     if (state.alu && !A[state.alu]) state.alu = "";
-    $("f-alu").innerHTML = '<option value="">Elegí un alumno…</option>' + keys.map(function(k){ return '<option value="'+esc(k)+'"'+(k === state.alu ? ' selected' : '')+'>'+esc(A[k].nombre)+' ('+A[k].f.length+')</option>'; }).join("");
+    $("f-alu").innerHTML = '<option value="">Elegí un alumno…</option>' + keys.map(function(k){ return '<option value="'+esc(k)+'"'+(k === state.alu ? ' selected' : '')+'>'+esc(A[k].nombre)+'</option>'; }).join("");
     var a = A[state.alu];
     $("alu-xls").disabled = $("alu-pdf").disabled = !a;
-    if (!a){ $("alu-body").innerHTML = '<p class="sub">Elegí un alumno para ver todos sus pagos y descargarlos.</p>'; return; }
+    var aviso = !state.vu ? (state.vuErr ? '<p class="sub" style="margin:6px 0 0;color:var(--down)">No se pudieron leer los vuelos ('+esc(state.vuErr)+'). Se muestran solo los pagos.</p>' : '<p class="sub" style="margin:6px 0 0">Cargando vuelos…</p>') : '';
+    if (!a){ $("alu-body").innerHTML = aviso + '<p class="sub">Elegí un alumno para ver sus pagos y vuelos, con el saldo de horas, y descargarlo.</p>'; return; }
     var otros = Object.keys(a.var).filter(function(n){ return n !== a.nombre; });
-    function k(t, v){ return '<div><span class="flabel">'+esc(t)+'</span><b class="num">'+v+'</b></div>'; }
-    $("alu-body").innerHTML =
-      '<div class="alu-sum">' + k("Pagos", fmtInt(a.f.length)) + aluTotales(a).map(function(t){ return k(t[0], t[1]); }).join("") +
-        aluHoras(a).map(function(r){ return k(r[0] + " (h pagas)", h1(r[1])); }).join("") +
-        k("Primer pago", fmtDate(a.f[0].date)) + k("Último pago", fmtDate(a.f[a.f.length - 1].date)) + '</div>' +
+    function k(t, v, sub, cls){ return '<div><span class="flabel">'+esc(t)+'</span><b class="num '+(cls || '')+'">'+v+'</b>'+(sub ? '<span class="sub" style="font-size:.76rem">'+sub+'</span>' : '')+'</div>'; }
+    function cls(v){ v = Math.round(v * 10) / 10; return v > 0 ? 'up' : v < 0 ? 'down' : ''; }
+    $("alu-body").innerHTML = aviso +
+      '<div class="alu-sum">' + k("Pagos", fmtInt(a.pagos.length), fmtInt(a.vuelos.length) + " vuelos") + aluTotales(a).map(function(t){ return k(t[0], t[1]); }).join("") +
+        k("Saldo de horas", hs(a.saldo) + ' h', a.saldo >= 0 ? "a favor del alumno" : "voló más de lo pagado", cls(a.saldo)) +
+        aluGrupos(a).map(function(g){ return k(g[0], hs(g[3]) + ' h', h1(g[1]) + ' pagas · ' + h1(g[2]) + ' voladas', cls(g[3])); }).join("") + '</div>' +
       (otros.length ? '<p class="sub" style="margin:0">También cargado como: '+esc(otros.join(", "))+'</p>' : '') +
-      '<div class="tbl alu-tbl"><table><thead><tr><th>#</th><th>Fecha</th><th>Concepto</th><th>Avión</th><th class="r">Horas</th><th>Forma</th><th class="r">Monto</th></tr></thead><tbody>' +
-      a.f.map(function(m, i){
-        return '<tr><td class="num sub">'+(i + 1)+'</td><td class="num">'+fmtDate(m.date)+'</td><td>'+esc(m.cat)+'</td><td><span class="acdot" style="background:'+acColor(m.ac)+'"></span>'+esc(m.ac)+'</td><td class="r">'+(m.hours ? h1(m.hours) : '—')+'</td><td>'+esc(m.forma)+'</td><td class="r">'+monto(m.cur, m.amt)+'</td></tr>'; }).join("") +
-      aluTotales(a).map(function(t, i){ return '<tr class="'+(i ? '' : 'tot')+'"><td></td><td colspan="5"><b>'+(i ? '' : 'Total · '+fmtInt(a.f.length)+' pagos')+'</b></td><td class="r"><b>'+t[1]+'</b></td></tr>'; }).join("") +
-      '</tbody></table></div>';
+      '<div class="tbl alu-tbl"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Avión</th><th>Detalle</th><th class="r">Monto</th><th class="r">Horas</th><th class="r">Saldo (h)</th></tr></thead><tbody>' +
+      a.L.map(function(e){ var pago = e.tipo === "Pago";
+        return '<tr'+(pago ? ' class="alu-pago"' : '')+'><td class="num">'+fmtDate(e.date)+'</td><td><span class="tag'+(pago ? ' ting' : '')+'">'+e.tipo+'</span></td><td><span class="acdot" style="background:'+acColor(e.ac)+'"></span>'+esc(e.ac)+'</td><td class="wrapc">'+esc(e.det)+'</td><td class="r">'+(pago ? monto(e.cur, e.amt) : '')+'</td><td class="r '+(pago && e.h ? 'up' : '')+'">'+(e.h ? hs(e.h) : '—')+'</td><td class="r '+cls(e.saldo)+'"><b>'+hs(e.saldo)+'</b></td></tr>'; }).join("") +
+      '<tr class="tot"><td colspan="4"><b>Total · '+fmtInt(a.pagos.length)+' pagos · '+fmtInt(a.vuelos.length)+' vuelos</b></td><td class="r"><b>'+aluTotales(a).map(function(t){ return t[1]; }).join('<br>')+'</b></td><td></td><td class="r '+cls(a.saldo)+'"><b>'+hs(a.saldo)+'</b></td></tr>' +
+      '</tbody></table></div>' +
+      '<p class="sub" style="margin:8px 0 0">El saldo arranca en 0 en el primer movimiento registrado del alumno: cada pago suma las horas que abonó y cada vuelo o sesión de simulador resta lo que voló. El saldo general mezcla aviones; el de cada avión está arriba.</p>';
   }
   function aluArchivo(a, ext){
     var n = new Date();
-    return "Pagos - " + a.nombre.replace(/[\\\/:*?"<>|]/g, "") + " - " + n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0") + "." + ext;
+    return "Cuenta de horas - " + a.nombre.replace(/[\\\/:*?"<>|]/g, "") + " - " + n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0") + "." + ext;
   }
   function aluExcel(a){
     var hoy = new Date(), filas = [
-      [{ v: "Génesis Aviación · Pagos de " + a.nombre, s: 5 }],
-      ["Generado el " + fecha4(hoy) + " · " + a.f.length + " pagos · del " + fecha4(a.f[0].date) + " al " + fecha4(a.f[a.f.length - 1].date)],
+      [{ v: "Génesis Aviación · Cuenta de horas de " + a.nombre, s: 5 }],
+      ["Generado el " + fecha4(hoy) + " · " + a.pagos.length + " pagos · " + a.vuelos.length + " vuelos · saldo " + hs(a.saldo) + " h"],
       [],
-      ["Fecha", "Concepto", "Avión", "Horas", "Forma de pago", "Moneda", "Monto"].map(function(t){ return { v: t, s: 6 }; })
+      ["Fecha", "Movimiento", "Avión", "Detalle", "Moneda", "Monto", "Horas pagas", "Horas voladas", "Saldo (h)"].map(function(t){ return { v: t, s: 6 }; })
     ];
-    a.f.forEach(function(m){ filas.push([{ d: m.date }, m.cat, m.ac, m.hours ? { v: m.hours, s: 3 } : "", m.forma, m.cur, { v: m.amt, s: 7 }]); });
+    var ini = filas.length + 1;
+    a.L.forEach(function(e, i){
+      var r = filas.length + 1, pago = e.tipo === "Pago";
+      filas.push([{ d: e.date }, e.tipo, e.ac, e.det, pago ? e.cur : "", pago ? { v: e.amt, s: 7 } : "", pago && e.h ? { v: e.h, s: 3 } : "", !pago ? { v: -e.h, s: 3 } : "",
+        { f: (i ? "I" + (r - 1) : "0") + "+G" + r + "-H" + r, v: Math.round(e.saldo * 100) / 100, s: 3 }]);
+    });
+    var fin = filas.length;
+    filas.push([{ v: "Total", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: a.pagos.length + " pagos · " + a.vuelos.length + " vuelos", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 },
+      { f: "SUM(G" + ini + ":G" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.h > 0 ? e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "SUM(H" + ini + ":H" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.h < 0 ? -e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "G" + (fin + 1) + "-H" + (fin + 1), v: Math.round(a.saldo * 100) / 100, s: 4 }]);
     filas.push([]);
-    ["ARS", "USD"].forEach(function(c){ if (a.tot[c]) filas.push([{ v: "Total " + (c === "ARS" ? "pesos" : "dólares"), s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: c, s: 1 }, { v: a.tot[c], s: 8 }]); });
-    var hs = aluHoras(a);
-    if (hs.length){ filas.push([]); filas.push([{ v: "Horas pagas por avión", s: 6 }, { v: "", s: 6 }]); hs.forEach(function(r){ filas.push([r[0], { v: Math.round(r[1] * 100) / 100, s: 3 }]); }); }
-    return xlsx("Pagos", filas, [12, 26, 11, 8, 18, 9, 14], 4);
+    ["ARS", "USD"].forEach(function(c){ if (a.tot[c]) filas.push([{ v: "Total pagado en " + (c === "ARS" ? "pesos" : "dólares"), s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: c, s: 1 }, { v: a.tot[c], s: 8 }]); });
+    var gs = aluGrupos(a);
+    if (gs.length){ filas.push([]); filas.push(["Avión", "Horas pagas", "Horas voladas", "Saldo (h)"].map(function(t){ return { v: t, s: 6 }; }));
+      gs.forEach(function(g){ filas.push([g[0], { v: Math.round(g[1] * 100) / 100, s: 3 }, { v: Math.round(g[2] * 100) / 100, s: 3 }, { v: Math.round(g[3] * 100) / 100, s: 3 }]); }); }
+    return xlsx("Cuenta de horas", filas, [12, 12, 11, 34, 8, 13, 12, 13, 11], 4);
   }
   function aluPdf(a){
     var W = 595.28, H = 841.89, M = 40, hoy = new Date();
-    var cols = [["#", 22, "r"], ["Fecha", 60], ["Concepto", 128], ["Avión", 58], ["Horas", 40, "r"], ["Forma de pago", 105], ["Monto", 102, "r"]];
+    var cols = [["Fecha", 56], ["Mov.", 36], ["Avión", 52], ["Detalle", 168], ["Monto", 82, "r"], ["Horas", 56, "r"], ["Saldo (h)", 65, "r"]];
     function e2(s){ return pdfTxt(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"); }
     function txt(x, y, s, size, bold, color){ return (color || "0 0 0") + " rg BT /" + (bold ? "F2" : "F1") + " " + size + " Tf " + x.toFixed(2) + " " + y.toFixed(2) + " Td (" + e2(s) + ") Tj ET\n"; }
     function txtR(x, y, s, size, bold, color){ return txt(x - anchoTxt(s, size, bold), y, s, size, bold, color); }
     function linea(x1, y1, x2, y2, gris){ return (gris || "0.8") + " G 0.5 w " + x1 + " " + y1.toFixed(2) + " m " + x2 + " " + y2.toFixed(2) + " l S\n"; }
-    function celdas(y, vals, size, bold, color){
+    function col(v){ v = Math.round(v * 10) / 10; return v > 0 ? "0.04 0.5 0.2" : v < 0 ? "0.75 0.15 0.15" : "0 0 0"; }
+    function celdas(y, vals, size, bold, colores){
       var x = M, s = "";
-      cols.forEach(function(c, i){ var v = cortar(vals[i], c[1] - 6, size, bold); s += c[2] === "r" ? txtR(x + c[1] - 4, y, v, size, bold, color) : txt(x + 2, y, v, size, bold, color); x += c[1]; });
+      cols.forEach(function(c, i){ var v = cortar(vals[i], c[1] - 6, size, bold), cl = colores && colores[i]; s += c[2] === "r" ? txtR(x + c[1] - 4, y, v, size, bold, cl) : txt(x + 2, y, v, size, bold, cl); x += c[1]; });
       return s;
     }
     var paginas = [], c = "", y, fila = 15;
@@ -918,33 +978,38 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       c = ""; y = H - M;
       if (primera){
         c += txt(M, y - 4, "Génesis Aviación", 10, true, "0.769 0.071 0.188"); y -= 26;
-        c += txt(M, y, "Pagos de " + a.nombre, 17, true); y -= 18;
-        c += txt(M, y, "Generado el " + fecha4(hoy) + "  ·  del " + fecha4(a.f[0].date) + " al " + fecha4(a.f[a.f.length - 1].date), 9, false, "0.35 0.35 0.35"); y -= 22;
-        var res = [["Pagos", fmtInt(a.f.length)]].concat(aluTotales(a), aluHoras(a).map(function(r){ return [r[0] + " (h pagas)", h1(r[1])]; })), x = M;
+        c += txt(M, y, "Cuenta de horas de " + a.nombre, 17, true); y -= 18;
+        c += txt(M, y, "Generado el " + fecha4(hoy) + "  ·  " + a.pagos.length + " pagos  ·  " + a.vuelos.length + " vuelos", 9, false, "0.35 0.35 0.35"); y -= 22;
+        var res = aluTotales(a).map(function(t){ return [t[0], t[1], "0 0 0"]; }).concat([["Saldo de horas", hsP(a.saldo) + " h", col(a.saldo)]],
+          aluGrupos(a).map(function(g){ return [g[0] + " (" + h1(g[1]) + " pagas / " + h1(g[2]) + " voladas)", hsP(g[3]) + " h", col(g[3])]; })), x = M;
         res.forEach(function(r){
           var w = Math.max(70, anchoTxt(r[0].toUpperCase(), 7) + 18, anchoTxt(r[1], 13, true) + 18);
           if (x + w > W - M){ x = M; y -= 36; }
-          c += txt(x, y, r[0].toUpperCase(), 7, false, "0.45 0.45 0.45") + txt(x, y - 15, r[1], 13, true); x += w;
+          c += txt(x, y, r[0].toUpperCase(), 7, false, "0.45 0.45 0.45") + txt(x, y - 15, r[1], 13, true, r[2]); x += w;
         });
         y -= 34; c += linea(M, y + 8, W - M, y + 8, "0.6"); y -= 8;
       } else {
-        c += txt(M, y, "Pagos de " + a.nombre + " (continuación)", 9, true, "0.35 0.35 0.35"); y -= 18;
+        c += txt(M, y, "Cuenta de horas de " + a.nombre + " (continuación)", 9, true, "0.35 0.35 0.35"); y -= 18;
       }
       c += "0.906 0.898 0.878 rg " + M + " " + (y - 5).toFixed(2) + " " + (W - 2 * M) + " 16 re f\n";
-      c += celdas(y, cols.map(function(x){ return x[0]; }), 8, true, "0.25 0.25 0.25"); y -= fila + 2;
+      c += celdas(y, cols.map(function(x){ return x[0]; }), 8, true, cols.map(function(){ return "0.25 0.25 0.25"; })); y -= fila + 2;
     }
     nuevaPagina(true);
-    a.f.forEach(function(m, i){
+    a.L.forEach(function(e){
       if (y < M + 30) nuevaPagina(false);
-      c += celdas(y, [String(i + 1), fecha4(m.date), m.cat, m.ac, m.hours ? h1(m.hours) : "-", m.forma, monto(m.cur, m.amt)], 8, false);
+      var pago = e.tipo === "Pago";
+      if (pago) c += "0.96 0.955 0.94 rg " + M + " " + (y - 5).toFixed(2) + " " + (W - 2 * M) + " " + fila + " re f\n";
+      c += celdas(y, [fecha4(e.date), e.tipo, e.ac, e.det, pago ? monto(e.cur, e.amt) : "", e.h ? hsP(e.h) : "-", hsP(e.saldo)], 8, false,
+        [0, 0, 0, 0, 0, pago && e.h ? col(1) : 0, col(e.saldo)]);
       c += linea(M, y - 5, W - M, y - 5, "0.88"); y -= fila;
     });
     var tots = aluTotales(a);
-    if (y < M + 20 + tots.length * 14) nuevaPagina(false);
+    if (y < M + 34 + tots.length * 14) nuevaPagina(false);
     c += linea(M, y + 9, W - M, y + 9, "0.3");
-    tots.forEach(function(t, i){ c += txt(M + 24, y - 2, i ? "" : "Total  ·  " + fmtInt(a.f.length) + " pagos", 9, true) + txtR(W - M - 4, y - 2, t[1], 9, true); y -= 14; });
+    c += txt(M + 2, y - 2, "Saldo final de horas", 9, true) + txtR(W - M - 4, y - 2, hsP(a.saldo) + " h", 9, true, col(a.saldo)); y -= 16;
+    tots.forEach(function(t){ c += txt(M + 2, y - 2, t[0], 9, false) + txtR(W - M - 4, y - 2, t[1], 9, true); y -= 14; });
     paginas.push(c);
-    paginas = paginas.map(function(p, i){ return p + txtR(W - M, 24, "Página " + (i + 1) + " de " + paginas.length, 8, false, "0.5 0.5 0.5") + txt(M, 24, "Registro de ingresos · Génesis Aviación", 8, false, "0.5 0.5 0.5"); });
+    paginas = paginas.map(function(p, i){ return p + txtR(W - M, 24, "Página " + (i + 1) + " de " + paginas.length, 8, false, "0.5 0.5 0.5") + txt(M, 24, "Pagos (Ingresos) y vuelos (Vuelo y Simulador) · Génesis Aviación", 8, false, "0.5 0.5 0.5"); });
     return pdfDoc(paginas);
   }
   $("f-alu").addEventListener("change", function(e){ state.alu = e.target.value; renderAlumno(); });
@@ -1041,12 +1106,13 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   }
   $("kpis").innerHTML = [1,2,3,4].map(function(){ return '<div class="kpi"><span class="k">Cargando</span><div class="skel" style="width:60%;height:30px;margin-top:6px"></div><div class="skel" style="width:80%;margin-top:6px"></div></div>'; }).join("");
   $("chart").innerHTML = '<div class="skel" style="height:280px"></div>';
+  loadVuelos();
   if (KEY){
     setView(state.view);
     try { apply(JSON.parse(localStorage.getItem(STORE) || "null")); } catch(e) {}
     load(false);
   } else askKey();
-  setInterval(function(){ if (!document.hidden && KEY) load(false); }, 300000);
+  setInterval(function(){ if (!document.hidden && KEY){ load(false); loadVuelos(); } }, 300000);
   $("refresh").addEventListener("click", function(){ setStatus("", "Actualizando desde la planilla…"); load(true); });
 })();
 </script>
