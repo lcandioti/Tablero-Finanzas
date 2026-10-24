@@ -290,15 +290,6 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     </section>
   </div>
 
-  <section class="panel" aria-labelledby="h-alu">
-    <div class="phead"><h2 id="h-alu">Pagos y vuelos por alumno</h2>
-      <div class="alu-ctl"><label class="mfilter"><span class="flabel">Alumno</span><select class="sel" id="f-alu"><option value="">Elegí un alumno…</option></select></label>
-        <button class="btn" id="alu-xls" type="button" disabled>Descargar Excel</button><button class="btn" id="alu-pdf" type="button" disabled>Descargar PDF</button></div>
-    </div>
-    <p class="sub" style="margin:0">Todos los pagos (en su moneda original) y vuelos del alumno en orden de fecha, con el saldo de horas acumulado. No aplica los filtros de arriba.</p>
-    <div id="alu-body"></div>
-  </section>
-
   <section class="panel" aria-labelledby="h-ac">
     <div class="phead"><h2 id="h-ac">Resultado por avión</h2><span class="sub">Ingresos menos egresos asignados a cada avión</span></div>
     <div class="tbl" id="por-avion"></div>
@@ -327,6 +318,15 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     <div class="kpis" id="saldo-kpis"></div>
     <div class="tbl" id="saldo-tbl"></div>
     <p class="sub" id="saldo-note" style="margin:0"></p>
+  </section>
+
+  <section class="panel" aria-labelledby="h-alu">
+    <div class="phead"><h2 id="h-alu">Pagos y vuelos por alumno</h2>
+      <div class="alu-ctl"><label class="mfilter"><span class="flabel">Alumno</span><select class="sel" id="f-alu"><option value="">Elegí un alumno…</option></select></label>
+        <button class="btn" id="alu-xls" type="button" disabled>Descargar Excel</button><button class="btn" id="alu-pdf" type="button" disabled>Descargar PDF</button></div>
+    </div>
+    <p class="sub" style="margin:0">Todos los pagos (en su moneda original) y vuelos del alumno en orden de fecha, con el saldo de horas acumulado. No depende de los filtros de la pestaña Finanzas. También podés tocar un nombre en la tabla de arriba.</p>
+    <div id="alu-body"></div>
   </section>
   </div>
 
@@ -684,7 +684,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     $("saldo-tbl").innerHTML = total ? '<table><thead><tr><th>Alumno / piloto</th><th class="r">Saldo C150</th><th class="r">Saldo S091</th><th class="r">Previsión</th><th>Último pago</th><th>Último vuelo</th><th>Observaciones</th></tr></thead><tbody>' +
       show.map(function(r){
         var c = Number(r[3]) || 0, x = Number(r[6]) || 0;
-        return '<tr><td>'+esc(r[0])+'</td><td class="r '+(c>0?'up':c<0?'down':'')+'" title="Pagó '+esc(r[1])+' h · voló '+esc(r[2])+' h">'+fmtHs(c)+'</td><td class="r '+(x>0?'up':x<0?'down':'')+'" title="Pagó '+esc(r[4])+' h · voló '+esc(r[5])+' h">'+fmtHs(x)+'</td><td class="r"><b>'+(r[9] ? usd(r[9]) : '—')+'</b></td><td class="num">'+esc(r[7] || '—')+'</td><td class="num">'+esc(r[8] || '—')+'</td><td class="wrapc sub">'+esc(r[10] || '')+'</td></tr>';
+        return '<tr><td><span class="alulink" role="button" tabindex="0" data-alu="'+esc(r[0])+'" title="Ver sus pagos y vuelos">'+esc(r[0])+'</span></td><td class="r '+(c>0?'up':c<0?'down':'')+'" title="Pagó '+esc(r[1])+' h · voló '+esc(r[2])+' h">'+fmtHs(c)+'</td><td class="r '+(x>0?'up':x<0?'down':'')+'" title="Pagó '+esc(r[4])+' h · voló '+esc(r[5])+' h">'+fmtHs(x)+'</td><td class="r"><b>'+(r[9] ? usd(r[9]) : '—')+'</b></td><td class="num">'+esc(r[7] || '—')+'</td><td class="num">'+esc(r[8] || '—')+'</td><td class="wrapc sub">'+esc(r[10] || '')+'</td></tr>';
       }).join("") + '</tbody></table>' + (total > 25 ? '<p style="margin:8px 0 0"><button class="link" type="button" id="saldo-more">'+(state.saldoAll ? 'Ver solo los primeros 25' : 'Ver todos ('+total+')')+'</button></p>' : '') : '<p class="sub">Nadie en esta categoría.</p>';
     $("saldo-note").innerHTML = 'Calculado al día de hoy. Saldo = horas pagadas (Ingresos) − horas voladas (Vuelo) desde el '+esc(s.desde)+'. El detalle completo está en la pestaña «Saldo horas» de la planilla, donde también se cambian los costos por hora.';
   }
@@ -1018,7 +1018,9 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   document.addEventListener("click", function(e){
     var r = e.target.closest && e.target.closest("[data-alu]");
     if (!r) return;
-    var ix = state.aluIdx || aluIndex(); state.alu = ix.key(r.getAttribute("data-alu")); renderAlumno();
+    var ix = state.aluIdx || aluIndex(); state.alu = ix.key(r.getAttribute("data-alu"));
+    if (state.view !== "alu") setView("alu", true);
+    renderAlumno();
     $("h-alu").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
