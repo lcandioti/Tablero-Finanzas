@@ -189,9 +189,14 @@ td.big{font-weight:600}
 .chip-mes{font:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--grid);border-radius:999px;padding:2px 10px;cursor:pointer;text-transform:capitalize}.chip-mes:hover{border-color:var(--fg)}.chip-mes span{color:var(--muted);margin-left:4px}
 
 /* Finanzas */
-:root{--ink-ing:#55534f}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink-ing:#b4b1a8}}
-:root[data-theme="dark"]{--ink-ing:#b4b1a8}
+:root{--ink-ing:#55534f;--wf-up:#2f8f3a;--wf-down:#c9302c;--wf-tot:#55534f}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink-ing:#b4b1a8;--wf-up:#4cc35a;--wf-down:#ff6b62;--wf-tot:#b4b1a8}}
+.caja-row{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-end;border-top:1px dashed var(--axis);padding-top:12px;margin-top:4px}
+.caja-row>div{display:flex;flex-direction:column;gap:2px}
+.caja-v{font-size:1.6rem}
+.caja-ini{display:flex;flex-direction:column;gap:4px}
+.caja-ini input{width:170px;font:inherit;font-variant-numeric:tabular-nums}
+:root[data-theme="dark"]{--ink-ing:#b4b1a8;--wf-up:#4cc35a;--wf-down:#ff6b62;--wf-tot:#b4b1a8}
 .hrow.fin{grid-template-columns:minmax(0,10rem) minmax(0,1fr) 7.5rem}
 .hrow .val small{color:var(--muted)}
 .tag.ting{color:var(--fg)} .tag.tegr{color:var(--s1);border-color:var(--s1)}
@@ -269,11 +274,12 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
 
   <section class="panel" aria-labelledby="h-month">
     <div class="phead">
-      <h2 id="h-month">Ingresos y egresos por mes</h2>
+      <h2 id="h-month">Resultado mensual y caja teórica</h2>
       <div class="legend" id="legend"></div>
     </div>
     <div class="chartbox" id="chart"></div>
-    <div><button class="link" id="toggle-table" type="button">Ver como tabla</button> <span class="sub" style="margin-left:10px">Tocá un mes para ver sus rubros y conceptos</span></div>
+    <div id="caja"></div>
+    <div><button class="link" id="toggle-table" type="button">Ver como tabla</button> <span class="sub" style="margin-left:10px">Tocá un mes para ver sus rubros, conceptos y movimientos</span></div>
     <div class="tbl" id="month-table" hidden></div>
   </section>
 
@@ -535,62 +541,95 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     return ks;
   }
   function niceStep(x){ if (x <= 0) return 1; var p = Math.pow(10, Math.floor(Math.log10(x))), f = x/p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  // Saldo inicial de caja y bancos (por moneda), guardado en este navegador
+  var CAJA = "gen-fin-caja";
+  function cajaIni(){ try { var o = JSON.parse(localStorage.getItem(CAJA) || "{}"); return Number(o[state.cur]) || 0; } catch(e) { return 0; } }
+  function setCajaIni(v){ try { var o = JSON.parse(localStorage.getItem(CAJA) || "{}"); o[state.cur] = v; localStorage.setItem(CAJA, JSON.stringify(o)); } catch(e) {} }
+  // Cascada: saldo al inicio del período, resultado de cada mes (verde suma, rojo resta) y caja teórica al cierre
   function renderChart(list){
     var ks = monthSpan(list), data = {};
     ks.forEach(function(k){ data[k] = {ing:0, egr:0}; });
     list.forEach(function(x){ var k = monthKey(x.m.date); if (data[k]) data[k][x.m.kind] += x.v; });
-    $("legend").innerHTML = '<span><i style="background:var(--ink-ing)"></i>Ingresos</span><span><i style="background:var(--s1)"></i>Egresos</span><span><svg width="22" height="10" aria-hidden="true"><line x1="1" x2="21" y1="5" y2="5" stroke="var(--fg)" stroke-width="2"/><circle cx="11" cy="5" r="3" fill="var(--surface)" stroke="var(--fg)" stroke-width="2"/></svg>Resultado</span>';
-    if (!ks.length || !list.length){ $("chart").innerHTML = '<p class="sub">No hay movimientos con estos filtros.</p>'; $("month-table").innerHTML = ""; return; }
-    var res = ks.map(function(k){ return data[k].ing - data[k].egr; });
-    var hi = Math.max.apply(null, ks.map(function(k){ return Math.max(data[k].ing, data[k].egr); }).concat([1]));
-    var lo = Math.min.apply(null, res.concat([0]));
-    var step = niceStep((hi - lo)/5), top = Math.ceil(hi/step)*step, bot = Math.floor(lo/step)*step;
-    var box = $("chart"), W = Math.max(box.clientWidth || 600, ks.length*44 + 60), H = 320;
-    var m = {l:56, r:10, t:16, b:34}, iw = W-m.l-m.r, ih = H-m.t-m.b, bw = iw/ks.length, barW = Math.max(4, Math.min(22, bw*0.36));
+    $("legend").innerHTML = '<span><i style="background:var(--wf-up)"></i>Mes positivo</span><span><i style="background:var(--wf-down)"></i>Mes negativo</span><span><i style="background:var(--wf-tot)"></i>Caja</span>';
+    if (!ks.length || !list.length){ $("chart").innerHTML = '<p class="sub">No hay movimientos con estos filtros.</p>'; $("month-table").innerHTML = ""; $("caja").innerHTML = ""; return; }
+    // Todo lo anterior al período (con los mismos filtros de avión) entra en el saldo de arranque
+    var all = filtered(true), start = new Date(Math.floor(ks[0]/100), ks[0]%100, 1), prev = 0, ini = cajaIni();
+    var finMes = new Date(Math.floor(ks[ks.length-1]/100), ks[ks.length-1]%100 + 1, 1);
+    all.forEach(function(x){ if (x.m.date < start) prev += x.m.kind === "ing" ? x.v : -x.v; });
+    var open = ini + prev, run = open, steps = ks.map(function(k){ var r = data[k].ing - data[k].egr, a = run; run += r; return { k: k, r: r, a: a, b: run }; });
+    var close = run, primera = all.length ? all[0].m.date : start;
+    var lv = [0, open, close].concat(steps.map(function(s){ return s.b; }));
+    var hi = Math.max.apply(null, lv), lo = Math.min.apply(null, lv);
+    var step = niceStep((hi - lo)/5 || 1), top = Math.ceil(hi/step)*step, bot = Math.floor(lo/step)*step; if (top === bot) top = bot + step;
+    var n = ks.length + 2, box = $("chart"), W = Math.max(box.clientWidth || 600, n*46 + 60), H = 320;
+    var m = {l:56, r:10, t:22, b:34}, iw = W-m.l-m.r, ih = H-m.t-m.b, bw = iw/n, barW = Math.max(8, Math.min(40, bw*0.62));
     var y = function(v){ return m.t + (top - v)/(top - bot)*ih; };
-    var s = '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Ingresos y egresos por mes">';
+    var s = '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Resultado mensual en cascada y caja teórica">';
     for (var g = bot; g <= top + 1e-9; g += step){
       s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(g)+'" y2="'+y(g)+'" stroke="var(--'+(Math.abs(g)<1e-9?'axis':'grid')+')" stroke-width="1"/>';
       s += '<text x="'+(m.l-8)+'" y="'+(y(g)+4)+'" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">'+axisC(g)+'</text>';
     }
-    var every = Math.ceil(ks.length / Math.max(1, Math.floor(iw/52))), hits = '', pts = [];
-    ks.forEach(function(k,i){
-      var cx = m.l + bw*i + bw/2, d = data[k], y0 = y(0);
-      function bar(x, v, fill){ if (v <= 0) return ''; var yy = y(v), r = Math.min(3, (y0-yy)/2); return '<path class="seg" data-k="'+k+'" fill="'+fill+'" d="M'+x+','+y0+' V'+(yy+r)+' Q'+x+','+yy+' '+(x+r)+','+yy+' H'+(x+barW-r)+' Q'+(x+barW)+','+yy+' '+(x+barW)+','+(yy+r)+' V'+y0+' Z"/>'; }
-      s += bar(cx - barW - 1, d.ing, "var(--ink-ing)") + bar(cx + 1, d.egr, "var(--s1)");
-      pts.push([cx, y(res[i])]);
-      if (i % every === 0 || i === ks.length-1)
-        s += '<text x="'+cx+'" y="'+(H-m.b+16)+'" text-anchor="middle" font-size="11" fill="var(--'+(i===ks.length-1?'fg':'muted')+')" font-family="var(--f-mono)">'+monthLabel(k)+'</text>';
-      if (state.selMes === k) s = s.replace('<line', '<rect x="'+(m.l+bw*i+2)+'" y="'+m.t+'" width="'+(bw-4)+'" height="'+ih+'" rx="4" fill="var(--fg)" opacity=".07"/><line');
-      hits += '<rect class="hit" data-i="'+i+'" style="cursor:pointer" x="'+(m.l+bw*i)+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/>';
+    function rect(i, a, b, fill, cls, k){
+      var x = m.l + bw*i + (bw - barW)/2, y1 = y(Math.max(a, b)), h = Math.max(1.5, Math.abs(y(a) - y(b)));
+      return '<rect'+(cls ? ' class="'+cls+'"' : '')+(k ? ' data-k="'+k+'"' : '')+' x="'+x+'" y="'+y1+'" width="'+barW+'" height="'+h+'" rx="2" fill="'+fill+'"/>';
+    }
+    function lbl(i, v, yy, bold){ return bw < 38 ? '' : '<text x="'+(m.l + bw*i + bw/2)+'" y="'+yy+'" text-anchor="middle" font-size="10.5" font-family="var(--f-mono)" fill="var(--fg2)"'+(bold ? ' font-weight="600"' : '')+'>'+axisC(v)+'</text>'; }
+    function conn(i, v){ var x1 = m.l + bw*i + (bw + barW)/2, x2 = m.l + bw*(i+1) + (bw - barW)/2; return '<line x1="'+x1+'" x2="'+x2+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 2"/>'; }
+    var every = Math.ceil(n / Math.max(1, Math.floor(iw/52))), hits = '';
+    // Selección de mes (banda de fondo)
+    steps.forEach(function(st, j){ if (state.selMes === st.k) s += '<rect x="'+(m.l+bw*(j+1)+2)+'" y="'+m.t+'" width="'+(bw-4)+'" height="'+ih+'" rx="4" fill="var(--fg)" opacity=".07"/>'; });
+    s += rect(0, 0, open, "var(--wf-tot)") + lbl(0, open, y(Math.max(0, open)) - 6, true) + conn(0, open);
+    s += '<text x="'+(m.l + bw/2)+'" y="'+(H-m.b+16)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">Inicio</text>';
+    steps.forEach(function(st, j){
+      var i = j + 1, pos = st.r >= 0;
+      s += rect(i, st.a, st.b, pos ? "var(--wf-up)" : "var(--wf-down)", "seg", st.k);
+      s += lbl(i, st.r, pos ? y(st.b) - 6 : y(st.b) + 14);
+      s += conn(i, st.b);
+      if (j % every === 0 || j === steps.length-1)
+        s += '<text x="'+(m.l + bw*i + bw/2)+'" y="'+(H-m.b+16)+'" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-mono)">'+monthLabel(st.k)+'</text>';
+      hits += '<rect class="hit" data-i="'+j+'" style="cursor:pointer" x="'+(m.l+bw*i)+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/>';
     });
-    s += '<polyline points="'+pts.map(function(p){ return p[0]+','+p[1]; }).join(' ')+'" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" opacity=".8"/>';
-    s += '<polyline points="'+pts.map(function(p){ return p[0]+','+p[1]; }).join(' ')+'" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round"/>';
-    pts.forEach(function(p, i){ s += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="3.5" fill="var(--surface)" stroke="'+(res[i] >= 0 ? 'var(--fg)' : 'var(--down)')+'" stroke-width="2"/>'; });
+    s += rect(n-1, 0, close, "var(--wf-tot)") + lbl(n-1, close, y(Math.max(0, close)) - 6, true);
+    s += '<text x="'+(m.l + bw*(n-1) + bw/2)+'" y="'+(H-m.b+16)+'" text-anchor="middle" font-size="11" fill="var(--fg)" font-weight="600" font-family="var(--f-mono)">Caja</text>';
+    hits += '<rect class="hit0" x="'+m.l+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/><rect class="hit1" x="'+(m.l+bw*(n-1))+'" y="'+m.t+'" width="'+bw+'" height="'+ih+'" fill="transparent"/>';
     s += hits + '</svg>';
     box.innerHTML = s;
     function dimSel(){ box.querySelectorAll(".seg").forEach(function(sg){ sg.style.opacity = (!state.selMes || +sg.getAttribute("data-k") === state.selMes) ? "1" : ".35"; }); }
     dimSel();
     if (box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
     var tip = $("tip");
+    function place(ev){
+      tip.hidden = false;
+      var tx = ev.clientX + 14, ty = ev.clientY + 14;
+      if (tx + 250 > window.innerWidth) tx = ev.clientX - 254;
+      if (ty + tip.offsetHeight > window.innerHeight) ty = ev.clientY - tip.offsetHeight - 10;
+      tip.style.left = tx + "px"; tip.style.top = ty + "px";
+    }
+    function row(a, b, bold){ return '<div class="row"'+(bold ? ' style="border-top:1px solid currentColor;margin-top:4px;padding-top:4px"' : '')+'>'+(bold ? '<b>'+a+'</b><b>'+b+'</b>' : '<span>'+a+'</span><span>'+b+'</span>')+'</div>'; }
     box.querySelectorAll(".hit").forEach(function(el){
       el.addEventListener("pointermove", function(ev){
-        var i = +el.getAttribute("data-i"), k = ks[i], d = data[k];
-        box.querySelectorAll(".seg").forEach(function(sg){ sg.style.opacity = (+sg.getAttribute("data-k") === k) ? "1" : ".35"; });
-        tip.innerHTML = '<div class="t">'+MESES_L[k%100]+' '+Math.floor(k/100)+'</div><div class="row"><span>Ingresos</span><span>'+fmtM(d.ing)+'</span></div><div class="row"><span>Egresos</span><span>'+fmtM(d.egr)+'</span></div><div class="row" style="border-top:1px solid currentColor;margin-top:4px;padding-top:4px"><b>Resultado</b><b>'+fmtM(d.ing-d.egr)+'</b></div>';
-        tip.hidden = false;
-        var tx = ev.clientX + 14, ty = ev.clientY + 14;
-        if (tx + 230 > window.innerWidth) tx = ev.clientX - 234;
-        if (ty + tip.offsetHeight > window.innerHeight) ty = ev.clientY - tip.offsetHeight - 10;
-        tip.style.left = tx + "px"; tip.style.top = ty + "px";
+        var st = steps[+el.getAttribute("data-i")], d = data[st.k];
+        box.querySelectorAll(".seg").forEach(function(sg){ sg.style.opacity = (+sg.getAttribute("data-k") === st.k) ? "1" : ".35"; });
+        tip.innerHTML = '<div class="t">'+MESES_L[st.k%100]+' '+Math.floor(st.k/100)+'</div>' + row("Ingresos", fmtM(d.ing)) + row("Egresos", fmtM(d.egr)) + row("Resultado", fmtM(st.r)) + row("Caja al cierre del mes", fmtM(st.b), true);
+        place(ev);
       });
       el.addEventListener("pointerleave", function(){ tip.hidden = true; dimSel(); });
-      el.addEventListener("click", function(){ var k = ks[+el.getAttribute("data-i")]; state.selMes = state.selMes === k ? null : k; tip.hidden = true; render(); });
+      el.addEventListener("click", function(){ var k = steps[+el.getAttribute("data-i")].k; state.selMes = state.selMes === k ? null : k; tip.hidden = true; render(); });
     });
-    var t = '<table><thead><tr><th>Mes</th><th class="r">Ingresos</th><th class="r">Egresos</th><th class="r">Resultado</th><th class="r">Margen</th></tr></thead><tbody>';
-    ks.slice().reverse().forEach(function(k){ var d = data[k], r = d.ing - d.egr;
-      t += '<tr><td>'+monthLabel(k)+'</td><td class="r">'+fmtM(d.ing)+'</td><td class="r">'+fmtM(d.egr)+'</td><td class="r '+(r>=0?'up':'down')+'"><b>'+fmtM(r)+'</b></td><td class="r">'+(d.ing ? Math.round(r/d.ing*100)+'%' : '—')+'</td></tr>'; });
-    $("month-table").innerHTML = t + '</tbody></table>';
+    box.querySelector(".hit0").addEventListener("pointermove", function(ev){ tip.innerHTML = '<div class="t">Saldo al inicio</div>' + row("Saldo inicial cargado", fmtM(ini)) + row("Resultado hasta " + fmtDate(new Date(start.getTime() - 864e5)), fmtM(prev)) + row("Inicio del período", fmtM(open), true); place(ev); });
+    box.querySelector(".hit1").addEventListener("pointermove", function(ev){ tip.innerHTML = '<div class="t">Caja teórica</div>' + row("Inicio", fmtM(open)) + row("Resultado del período", fmtM(close - open)) + row("Caja teórica", fmtM(close), true); place(ev); });
+    [".hit0", ".hit1"].forEach(function(c){ box.querySelector(c).addEventListener("pointerleave", function(){ tip.hidden = true; }); });
+    // Caja teórica para cruzar con caja y bancos
+    var hoy = new Date(), corte = finMes > hoy ? hoy : new Date(finMes.getTime() - 864e5);
+    var acs = acSel(), aviso = state.cur === "UNI" ? 'Ojo: «Todo en USD» convierte los pesos al dólar de cada día; para cruzar con caja y bancos usá «Solo $» y «Solo US$» por separado.' : acs.length ? 'Ojo: hay filtro de avión, así que esto no es la caja total.' : '';
+    $("caja").innerHTML = '<div class="caja-row"><div><span class="flabel">Caja teórica al '+fmtDate(corte)+'</span><b class="num caja-v '+(close < 0 ? 'down' : '')+'">'+fmtM(close)+'</b></div>' +
+      '<label class="caja-ini"><span class="flabel">Saldo inicial al '+fmtDate(primera)+' ('+sym()+')</span><input class="sel" id="caja-ini" type="text" inputmode="decimal" value="'+(ini ? fmtInt(ini) : '')+'" placeholder="0"></label>' +
+      '<p class="sub" style="margin:0;flex:1 1 280px">Caja teórica = saldo inicial + todos los ingresos − todos los egresos registrados hasta esa fecha'+(state.cur === "UNI" ? '' : ', solo en '+(state.cur === "ARS" ? 'pesos' : 'dólares'))+'. El saldo inicial se guarda en este navegador.'+(aviso ? '<br><b>'+aviso+'</b>' : '')+'</p></div>';
+    var t = '<table><thead><tr><th>Mes</th><th class="r">Ingresos</th><th class="r">Egresos</th><th class="r">Resultado</th><th class="r">Caja al cierre</th></tr></thead><tbody>' +
+      '<tr><td>Inicio</td><td></td><td></td><td></td><td class="r"><b>'+fmtM(open)+'</b></td></tr>';
+    steps.forEach(function(st){ var d = data[st.k];
+      t += '<tr><td>'+monthLabel(st.k)+'</td><td class="r">'+fmtM(d.ing)+'</td><td class="r">'+fmtM(d.egr)+'</td><td class="r '+(st.r>=0?'up':'down')+'"><b>'+fmtM(st.r)+'</b></td><td class="r">'+fmtM(st.b)+'</td></tr>'; });
+    $("month-table").innerHTML = t + '<tr class="tot"><td><b>Caja teórica</b></td><td></td><td></td><td class="r '+(close-open>=0?'up':'down')+'"><b>'+fmtM(close-open)+'</b></td><td class="r"><b>'+fmtM(close)+'</b></td></tr></tbody></table>';
   }
 
   // ---------- Barras por categoría ----------
@@ -1056,6 +1095,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   $("f-tipo").addEventListener("change", function(e){ state.tipo = e.target.value; renderLast(filtered(false)); });
   $("f-saldo").addEventListener("change", function(e){ state.saldoVer = e.target.value; state.saldoAll = false; renderSaldo(); });
   document.addEventListener("click", function(e){ if (e.target.id === "saldo-more"){ state.saldoAll = !state.saldoAll; renderSaldo(); } });
+  document.addEventListener("change", function(e){ if (e.target.id === "caja-ini"){ setCajaIni(parseAmt(e.target.value) || 0); render(); } });
   $("toggle-table").addEventListener("click", function(){ state.showTable = !state.showTable; render(); });
   var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt = setTimeout(render, 150); });
 
