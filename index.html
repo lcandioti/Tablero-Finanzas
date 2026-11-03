@@ -542,10 +542,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     return ks;
   }
   function niceStep(x){ if (x <= 0) return 1; var p = Math.pow(10, Math.floor(Math.log10(x))), f = x/p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
-  // Saldo inicial de caja y bancos (por moneda), guardado en este navegador
-  var CAJA = "gen-fin-caja";
-  function cajaIni(){ try { var o = JSON.parse(localStorage.getItem(CAJA) || "{}"); return Number(o[state.cur]) || 0; } catch(e) { return 0; } }
-  function setCajaIni(v){ try { var o = JSON.parse(localStorage.getItem(CAJA) || "{}"); o[state.cur] = v; localStorage.setItem(CAJA, JSON.stringify(o)); } catch(e) {} }
+  function cajaIni(){ return 0; } // la caja arranca en 0 al primer registro: todo lo demás lo calcula el tablero
   // Cascada: saldo al inicio del período, resultado de cada mes (verde suma, rojo resta) y caja teórica al cierre
   function renderChart(list){
     var ks = monthSpan(list), data = {};
@@ -617,15 +614,15 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       el.addEventListener("pointerleave", function(){ tip.hidden = true; dimSel(); });
       el.addEventListener("click", function(){ var k = steps[+el.getAttribute("data-i")].k; state.selMes = state.selMes === k ? null : k; tip.hidden = true; render(); });
     });
-    box.querySelector(".hit0").addEventListener("pointermove", function(ev){ tip.innerHTML = '<div class="t">Saldo al inicio</div>' + row("Saldo inicial cargado", fmtM(ini)) + row("Resultado hasta " + fmtDate(new Date(start.getTime() - 864e5)), fmtM(prev)) + row("Inicio del período", fmtM(open), true); place(ev); });
+    box.querySelector(".hit0").addEventListener("pointermove", function(ev){ tip.innerHTML = '<div class="t">Saldo al inicio</div>' + row("Resultado del " + fmtDate(primera) + " al " + fmtDate(new Date(start.getTime() - 864e5)), fmtM(prev)) + row("Inicio del período", fmtM(open), true); place(ev); });
     box.querySelector(".hit1").addEventListener("pointermove", function(ev){ tip.innerHTML = '<div class="t">Caja teórica</div>' + row("Inicio", fmtM(open)) + row("Resultado del período", fmtM(close - open)) + row("Caja teórica", fmtM(close), true); place(ev); });
     [".hit0", ".hit1"].forEach(function(c){ box.querySelector(c).addEventListener("pointerleave", function(){ tip.hidden = true; }); });
     // Caja teórica para cruzar con caja y bancos
     var hoy = new Date(), corte = finMes > hoy ? hoy : new Date(finMes.getTime() - 864e5);
     var acs = acSel(), aviso = state.cur === "UNI" ? 'Ojo: «Todo en USD» convierte los pesos al dólar de cada día; para cruzar con caja y bancos usá «Solo $» y «Solo US$» por separado.' : acs.length ? 'Ojo: hay filtro de avión, así que esto no es la caja total.' : '';
     $("caja").innerHTML = '<div class="caja-row"><div><span class="flabel">Caja teórica al '+fmtDate(corte)+'</span><b class="num caja-v '+(close < 0 ? 'down' : '')+'">'+fmtM(close)+'</b></div>' +
-      '<label class="caja-ini"><span class="flabel">Saldo inicial al '+fmtDate(primera)+' ('+sym()+')</span><input class="sel" id="caja-ini" type="text" inputmode="decimal" value="'+(ini ? fmtInt(ini) : '')+'" placeholder="0"></label>' +
-      '<p class="sub" style="margin:0;flex:1 1 280px">Caja teórica = saldo inicial + todos los ingresos − todos los egresos registrados hasta esa fecha'+(state.cur === "UNI" ? '' : ', solo en '+(state.cur === "ARS" ? 'pesos' : 'dólares'))+'. El saldo inicial se guarda en este navegador.'+(aviso ? '<br><b>'+aviso+'</b>' : '')+'</p></div>';
+
+      '<p class="sub" style="margin:0;flex:1 1 280px">Caja teórica = todos los ingresos − todos los egresos registrados desde el '+fmtDate(primera)+' (primer registro, con caja en 0) hasta esa fecha'+(state.cur === "UNI" ? '' : ', solo en '+(state.cur === "ARS" ? 'pesos' : 'dólares'))+'.'+(aviso ? '<br><b>'+aviso+'</b>' : '')+'</p></div>';
     var t = '<table><thead><tr><th>Mes</th><th class="r">Ingresos</th><th class="r">Egresos</th><th class="r">Resultado</th><th class="r">Caja al cierre</th></tr></thead><tbody>' +
       '<tr><td>Inicio</td><td></td><td></td><td></td><td class="r"><b>'+fmtM(open)+'</b></td></tr>';
     steps.forEach(function(st){ var d = data[st.k];
@@ -917,8 +914,11 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     });
     return function(ac){ var u = String(ac || "").toUpperCase(); if (/^SIM/.test(u)) return sim; return by[u] || ac || "Sin avión"; };
   }
+  function aluDesde(){ return (state.saldo && parseDate(state.saldo.desde)) || new Date(2026, 0, 1); }
   function aluIndex(){
-    var ing = state.movs.filter(function(m){ return m.kind === "ing" && m.who; });
+    // Las cuentas arrancan en la fecha «Desde» de la pestaña «Saldo horas» (antes no había rutina de carga)
+    var desde = aluDesde();
+    var ing = state.movs.filter(function(m){ return m.kind === "ing" && m.who && m.date >= desde; });
     var vu = (state.vu && state.vu.vuelos) || [], sim = (state.vu && state.vu.sim) || [];
     var key = nameIndex(ing.map(function(m){ return m.who; }).concat(vu.map(function(v){ return v[1]; }), sim.map(function(s){ return s[1]; })));
     var grupo = grupoDe(), A = {};
@@ -930,12 +930,12 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     // Solo se arma la cuenta de quienes tienen pagos registrados
     vu.forEach(function(v){
       var a = A[key(v[1])]; if (!a) return;
-      var d = parseDate(v[0]), h = parseHours(v[6]); if (!d || !(h > 0 && h <= 24)) return;
+      var d = parseDate(v[0]), h = parseHours(v[6]); if (!d || d < desde || !(h > 0 && h <= 24)) return;
       a.vuelos.push({ date: d, ac: String(v[7] || "").toUpperCase() || "Sin avión", inst: clean(v[3]), fin: clean(v[2]).toUpperCase(), h: h });
     });
     sim.forEach(function(s){
       var a = A[key(s[1])]; if (!a) return;
-      var d = parseDate(s[0]), h = parseHours(s[4]); if (!d || !(h > 0 && h <= 12)) return;
+      var d = parseDate(s[0]), h = parseHours(s[4]); if (!d || d < desde || !(h > 0 && h <= 12)) return;
       a.vuelos.push({ date: d, ac: "Simulador", inst: clean(s[3]), fin: clean(s[2]).toUpperCase(), h: h });
     });
     Object.keys(A).forEach(function(k){
@@ -964,7 +964,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     var a = A[state.alu];
     $("alu-xls").disabled = $("alu-pdf").disabled = !a;
     var aviso = !state.vu ? (state.vuErr ? '<p class="sub" style="margin:6px 0 0;color:var(--down)">No se pudieron leer los vuelos ('+esc(state.vuErr)+'). Se muestran solo los pagos.</p>' : '<p class="sub" style="margin:6px 0 0">Cargando vuelos…</p>') : '';
-    if (!a){ $("alu-body").innerHTML = aviso + '<p class="sub">Elegí un alumno para ver sus pagos y vuelos, con el saldo de horas, y descargarlo.</p>'; return; }
+    if (!a){ $("alu-body").innerHTML = aviso + '<p class="sub">Elegí un alumno para ver sus pagos y vuelos desde el '+fecha4(aluDesde())+', con el saldo de horas, y descargarlo.</p>'; return; }
     var otros = Object.keys(a.var).filter(function(n){ return n !== a.nombre; });
     function k(t, v, sub, cls){ return '<div><span class="flabel">'+esc(t)+'</span><b class="num '+(cls || '')+'">'+v+'</b>'+(sub ? '<span class="sub" style="font-size:.76rem">'+sub+'</span>' : '')+'</div>'; }
     function cls(v){ v = Math.round(v * 10) / 10; return v > 0 ? 'up' : v < 0 ? 'down' : ''; }
@@ -978,7 +978,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
         return '<tr'+(pago ? ' class="alu-pago"' : '')+'><td class="num">'+fmtDate(e.date)+'</td><td><span class="tag'+(pago ? ' ting' : '')+'">'+e.tipo+'</span></td><td><span class="acdot" style="background:'+acColor(e.ac)+'"></span>'+esc(e.ac)+'</td><td class="wrapc">'+esc(e.det)+'</td><td class="r">'+(pago ? monto(e.cur, e.amt) : '')+'</td><td class="r '+(pago && e.h ? 'up' : '')+'">'+(e.h ? hs(e.h) : '—')+'</td><td class="r '+cls(e.saldo)+'"><b>'+hs(e.saldo)+'</b></td></tr>'; }).join("") +
       '<tr class="tot"><td colspan="4"><b>Total · '+fmtInt(a.pagos.length)+' pagos · '+fmtInt(a.vuelos.length)+' vuelos</b></td><td class="r"><b>'+aluTotales(a).map(function(t){ return t[1]; }).join('<br>')+'</b></td><td></td><td class="r '+cls(a.saldo)+'"><b>'+hs(a.saldo)+'</b></td></tr>' +
       '</tbody></table></div>' +
-      '<p class="sub" style="margin:8px 0 0">El saldo arranca en 0 en el primer movimiento registrado del alumno: cada pago suma las horas que abonó y cada vuelo o sesión de simulador resta lo que voló. El saldo general mezcla aviones; el de cada avión está arriba.</p>';
+      '<p class="sub" style="margin:8px 0 0">El saldo arranca en 0 el '+fecha4(aluDesde())+' (fecha «Desde» de la pestaña «Saldo horas» de la planilla): lo anterior no se toma porque la carga no era completa. Cada pago suma las horas que abonó y cada vuelo o sesión de simulador resta lo que voló. El saldo general mezcla aviones; el de cada avión está arriba.</p>';
   }
   function aluArchivo(a, ext){
     var n = new Date();
@@ -987,7 +987,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   function aluExcel(a){
     var hoy = new Date(), filas = [
       [{ v: "Génesis Aviación · Cuenta de horas de " + a.nombre, s: 5 }],
-      ["Generado el " + fecha4(hoy) + " · " + a.pagos.length + " pagos · " + a.vuelos.length + " vuelos · saldo " + hs(a.saldo) + " h"],
+      ["Desde el " + fecha4(aluDesde()) + " · generado el " + fecha4(hoy) + " · " + a.pagos.length + " pagos · " + a.vuelos.length + " vuelos · saldo " + hs(a.saldo) + " h"],
       [],
       ["Fecha", "Movimiento", "Avión", "Detalle", "Moneda", "Monto", "Horas pagas", "Horas voladas", "Saldo (h)"].map(function(t){ return { v: t, s: 6 }; })
     ];
@@ -1027,7 +1027,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       if (primera){
         c += txt(M, y - 4, "Génesis Aviación", 10, true, "0.769 0.071 0.188"); y -= 26;
         c += txt(M, y, "Cuenta de horas de " + a.nombre, 17, true); y -= 18;
-        c += txt(M, y, "Generado el " + fecha4(hoy) + "  ·  " + a.pagos.length + " pagos  ·  " + a.vuelos.length + " vuelos", 9, false, "0.35 0.35 0.35"); y -= 22;
+        c += txt(M, y, "Desde el " + fecha4(aluDesde()) + "  ·  generado el " + fecha4(hoy) + "  ·  " + a.pagos.length + " pagos  ·  " + a.vuelos.length + " vuelos", 9, false, "0.35 0.35 0.35"); y -= 22;
         var res = aluTotales(a).map(function(t){ return [t[0], t[1], "0 0 0"]; }).concat([["Saldo de horas", hsP(a.saldo) + " h", col(a.saldo)]],
           aluGrupos(a).map(function(g){ return [g[0] + " (" + h1(g[1]) + " pagas / " + h1(g[2]) + " voladas)", hsP(g[3]) + " h", col(g[3])]; })), x = M;
         res.forEach(function(r){
@@ -1110,7 +1110,6 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   $("f-tipo").addEventListener("change", function(e){ state.tipo = e.target.value; renderLast(filtered(false)); });
   $("f-saldo").addEventListener("change", function(e){ state.saldoVer = e.target.value; state.saldoAll = false; renderSaldo(); });
   document.addEventListener("click", function(e){ if (e.target.id === "saldo-more"){ state.saldoAll = !state.saldoAll; renderSaldo(); } });
-  document.addEventListener("change", function(e){ if (e.target.id === "caja-ini"){ setCajaIni(parseAmt(e.target.value) || 0); render(); } });
   $("toggle-table").addEventListener("click", function(){ state.showTable = !state.showTable; render(); });
   var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt = setTimeout(render, 150); });
 
