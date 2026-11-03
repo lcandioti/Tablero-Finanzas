@@ -186,6 +186,7 @@ td.item .obs{display:block;font-size:.76rem;color:var(--muted)}
 td.big{font-weight:600}
 @media (prefers-reduced-motion:no-preference){.seg{transition:opacity .15s}}
 .hrow.pick{cursor:pointer;border-radius:4px;transition:opacity .15s}.hrow.pick:hover .n{text-decoration:underline}.hrow.pick.off{opacity:.45}.hrow.htot{border-top:1px solid var(--axis);padding-top:8px;margin-top:2px}
+.th-sort{all:unset;cursor:pointer;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:3px}.th-sort:hover,.th-sort.on{color:var(--fg)}.th-sort:focus-visible{outline:2px solid var(--fg2);outline-offset:2px}
 .chip-mes{font:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--grid);border-radius:999px;padding:2px 10px;cursor:pointer;text-transform:capitalize}.chip-mes:hover{border-color:var(--fg)}.chip-mes span{color:var(--muted);margin-left:4px}
 
 /* Finanzas */
@@ -673,11 +674,19 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     var sel = state.selMes, sc = state.selCat, det = !!(sel || sc);
     var l = list.filter(function(x){ return (!state.tipo || x.m.kind === state.tipo) && (!sel || monthKey(x.m.date) === sel) && (!sc || (x.m.kind === sc.kind && x.m.cat === sc.cat)); });
     l = det ? l.slice().sort(function(a,b){ return a.m.date - b.m.date; }) : l.slice(-25).reverse();
+    // Orden elegido tocando el encabezado: Monto (mayor a menor, menor a mayor) o Fecha
+    var so = state.lastSort;
+    if (so === "monto-desc") l.sort(function(a,b){ return b.v - a.v || b.m.date - a.m.date; });
+    else if (so === "monto-asc") l.sort(function(a,b){ return a.v - b.v || b.m.date - a.m.date; });
+    else if (so === "fecha-desc") l.sort(function(a,b){ return b.m.date - a.m.date; });
+    else if (so === "fecha-asc") l.sort(function(a,b){ return a.m.date - b.m.date; });
+    function th(k, txt, cls){ var on = so && so.indexOf(k) === 0, ar = on ? (/desc$/.test(so) ? ' ↓' : ' ↑') : '';
+      return '<th'+(cls ? ' class="'+cls+'"' : '')+' aria-sort="'+(on ? (/desc$/.test(so) ? 'descending' : 'ascending') : 'none')+'"><button type="button" class="th-sort'+(on ? ' on' : '')+'" data-sort="'+k+'" title="Ordenar por '+txt.toLowerCase()+'">'+txt+ar+'</button></th>'; }
     $("h-last").innerHTML = det ? esc('Movimientos' + (sc ? ' · ' + sc.cat : '') + (sel ? ' · ' + MESES_L[sel%100] + ' ' + Math.floor(sel/100) : '')) + ' <button class="chip-mes" type="button" data-clear-det title="Volver a los últimos movimientos">✕</button>' : 'Últimos movimientos';
     if (!l.length){ $("last").innerHTML = '<p class="sub">Sin movimientos.</p>'; return; }
     var ti = 0, te = 0; l.forEach(function(x){ if (x.m.kind === "ing") ti += x.v; else te += x.v; });
     var foot = !det ? '' : '<tr class="tot"><td colspan="6"><b>'+fmtInt(l.length)+' movimientos</b>'+(ti && te ? ' <span class="sub">· ingresos '+fmtM(ti)+' · egresos '+fmtM(te)+'</span>' : '')+'</td><td class="r '+(ti - te >= 0 ? '' : 'down')+'"><b>'+(ti - te < 0 ? '−' : '')+fmtM(Math.abs(ti - te))+'</b></td></tr>';
-    $("last").innerHTML = '<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Avión</th><th>Concepto / rubro</th><th>Alumno / detalle</th><th>Forma</th><th class="r">Monto</th></tr></thead><tbody>' +
+    $("last").innerHTML = '<table><thead><tr>'+th("fecha", "Fecha")+'<th>Tipo</th><th>Avión</th><th>Concepto / rubro</th><th>Alumno / detalle</th><th>Forma</th>'+th("monto", "Monto", "r")+'</tr></thead><tbody>' +
       l.map(function(x){ var m = x.m, ing = m.kind === "ing";
         return '<tr><td class="num">'+fmtDate(m.date)+'</td><td><span class="tag '+(ing?'ting':'tegr')+'">'+(ing?'Ingreso':'Egreso')+'</span></td><td><span class="acdot" style="background:'+acColor(m.ac)+'"></span>'+esc(m.ac)+'</td><td>'+esc(m.cat)+'</td><td class="wrapc">'+(ing && m.who ? '<span class="alulink" role="button" tabindex="0" data-alu="'+esc(m.who)+'" title="Ver todos sus pagos">'+esc(m.who)+'</span>' : esc(m.who || '—'))+'</td><td>'+esc(m.forma)+'</td><td class="r '+(ing?'':'down')+'">'+(ing?'':'−')+fmtM(x.v)+(state.cur === "UNI" && m.cur === "ARS" ? '<br><span class="sub">$ '+fmtInt(m.amt)+'</span>' : '')+'</td></tr>';
       }).join("") + foot + '</tbody></table>';
@@ -1072,6 +1081,12 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     if (a){ var k = a.getAttribute("data-ac"); state.ac[k] = !state.ac[k]; render(); }
     if (c){ state.cur = c.getAttribute("data-cur"); savePrefs(); render(); }
     if (e.target.closest("[data-clear-mes]")){ state.selMes = null; state.selCat = null; render(); }
+    var ts = e.target.closest("[data-sort]");
+    if (ts){ var sk = ts.getAttribute("data-sort"), cur = state.lastSort || "";
+      // Monto: mayor a menor → menor a mayor → orden normal. Fecha: más nueva → más vieja → orden normal.
+      state.lastSort = sk === "monto" ? (cur === "monto-desc" ? "monto-asc" : cur === "monto-asc" ? null : "monto-desc")
+                                      : (cur === "fecha-desc" ? "fecha-asc" : cur === "fecha-asc" ? null : "fecha-desc");
+      renderLast(filtered(false)); }
     if (e.target.closest("[data-clear-det]")){ state.selMes = null; state.selCat = null; render(); }
     var pk = e.target.closest(".hrow.pick");
     if (pk){ var kc = {kind: pk.getAttribute("data-kind"), cat: pk.getAttribute("data-cat")};
