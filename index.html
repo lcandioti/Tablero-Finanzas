@@ -954,9 +954,10 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
         .concat(a.vuelos.map(function(v){ return { date: v.date, tipo: "Vuelo", ac: v.ac, g: grupo(v.ac), det: (v.inst && !/^(n\/?a|-)$/i.test(v.inst) ? v.inst : "Sin instructor") + (v.fin ? " · " + v.fin : ""), cur: "", amt: 0, h: -v.h }; }));
       var ORD = { Inicial: 0, Pago: 1, Vuelo: 2 };
       L.sort(function(x, y){ return x.date - y.date || ORD[x.tipo] - ORD[y.tipo]; });
-      var s = 0, G = {}; L.forEach(function(e){ s += e.h; e.saldo = s;
+      // Dos saldos que no se mezclan: aviones y simulador
+      var s = 0, ss = 0, G = {}; L.forEach(function(e){ e.sim = /^sim/i.test(e.ac); if (e.sim) ss += e.h; else s += e.h; e.saldo = s; e.saldoSim = ss;
         var g = G[e.g] || (G[e.g] = { pag: 0, vol: 0, ini: 0 }); if (e.tipo === "Inicial") g.ini += e.h; else if (e.h > 0) g.pag += e.h; else g.vol -= e.h; });
-      a.L = L; a.G = G; a.saldo = s;
+      a.L = L; a.G = G; a.saldo = s; a.saldoSim = ss; a.hasSim = L.some(function(e){ return e.sim; });
     });
     state.aluIdx = { key: key, A: A };
     return state.aluIdx;
@@ -980,15 +981,16 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     function cls(v){ v = Math.round(v * 10) / 10; return v > 0 ? 'up' : v < 0 ? 'down' : ''; }
     $("alu-body").innerHTML = aviso +
       '<div class="alu-sum">' + k("Pagos", fmtInt(a.pagos.length), fmtInt(a.vuelos.length) + " vuelos") + aluTotales(a).map(function(t){ return k(t[0], t[1]); }).join("") +
-        k("Saldo de horas", hs(a.saldo) + ' h', a.saldo >= 0 ? "a favor del alumno" : "voló más de lo pagado", cls(a.saldo)) +
-        aluGrupos(a).map(function(g){ return k(g[0], hs(g[3]) + ' h', (g[4] ? 'inicial ' + hs(g[4]) + ' · ' : '') + h1(g[1]) + ' pagas · ' + h1(g[2]) + ' voladas', cls(g[3])); }).join("") + '</div>' +
+        k("Saldo aviones", hs(a.saldo) + ' h', a.saldo >= 0 ? "a favor del alumno" : "voló más de lo pagado", cls(a.saldo)) +
+        (a.hasSim ? k("Saldo simulador", hs(a.saldoSim) + ' h', (function(){ var g = aluGrupos(a).filter(function(g){ return /^sim/i.test(g[0]); })[0]; return g ? (g[4] ? 'inicial ' + hs(g[4]) + ' · ' : '') + h1(g[1]) + ' pagas · ' + h1(g[2]) + ' usadas' : ''; })(), cls(a.saldoSim)) : '') +
+        aluGrupos(a).filter(function(g){ return !/^sim/i.test(g[0]); }).map(function(g){ return k(g[0], hs(g[3]) + ' h', (g[4] ? 'inicial ' + hs(g[4]) + ' · ' : '') + h1(g[1]) + ' pagas · ' + h1(g[2]) + ' voladas', cls(g[3])); }).join("") + '</div>' +
       (otros.length ? '<p class="sub" style="margin:0">También cargado como: '+esc(otros.join(", "))+'</p>' : '') +
-      '<div class="tbl alu-tbl"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Avión</th><th>Detalle</th><th class="r">Monto</th><th class="r">Horas</th><th class="r">Saldo (h)</th></tr></thead><tbody>' +
+      '<div class="tbl alu-tbl"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Avión</th><th>Detalle</th><th class="r">Monto</th><th class="r">Horas</th><th class="r">Saldo aviones (h)</th>'+(a.hasSim ? '<th class="r">Saldo simulador (h)</th>' : '')+'</tr></thead><tbody>' +
       a.L.map(function(e){ var pago = e.tipo === "Pago";
-        return '<tr'+(pago || e.tipo === "Inicial" ? ' class="alu-pago"' : '')+'><td class="num">'+fmtDate(e.date)+'</td><td><span class="tag'+(pago ? ' ting' : '')+'">'+e.tipo+'</span></td><td><span class="acdot" style="background:'+acColor(e.ac)+'"></span>'+esc(e.ac)+'</td><td class="wrapc">'+esc(e.det)+'</td><td class="r">'+(pago ? monto(e.cur, e.amt) : '')+'</td><td class="r '+(pago && e.h ? 'up' : e.tipo === "Inicial" ? cls(e.h) : '')+'">'+(e.h ? hs(e.h) : '—')+'</td><td class="r '+cls(e.saldo)+'"><b>'+hs(e.saldo)+'</b></td></tr>'; }).join("") +
-      '<tr class="tot"><td colspan="4"><b>Total · '+fmtInt(a.pagos.length)+' pagos · '+fmtInt(a.vuelos.length)+' vuelos</b></td><td class="r"><b>'+aluTotales(a).map(function(t){ return t[1]; }).join('<br>')+'</b></td><td></td><td class="r '+cls(a.saldo)+'"><b>'+hs(a.saldo)+'</b></td></tr>' +
+        return '<tr'+(pago || e.tipo === "Inicial" ? ' class="alu-pago"' : '')+'><td class="num">'+fmtDate(e.date)+'</td><td><span class="tag'+(pago ? ' ting' : '')+'">'+e.tipo+'</span></td><td><span class="acdot" style="background:'+acColor(e.ac)+'"></span>'+esc(e.ac)+'</td><td class="wrapc">'+esc(e.det)+'</td><td class="r">'+(pago ? monto(e.cur, e.amt) : '')+'</td><td class="r '+(pago && e.h ? 'up' : e.tipo === "Inicial" ? cls(e.h) : '')+'">'+(e.h ? hs(e.h) : '—')+'</td><td class="r '+(e.sim ? 'sub' : cls(e.saldo))+'">'+(e.sim ? hs(e.saldo) : '<b>'+hs(e.saldo)+'</b>')+'</td>'+(a.hasSim ? '<td class="r '+(e.sim ? cls(e.saldoSim) : 'sub')+'">'+(e.sim ? '<b>'+hs(e.saldoSim)+'</b>' : hs(e.saldoSim))+'</td>' : '')+'</tr>'; }).join("") +
+      '<tr class="tot"><td colspan="4"><b>Total · '+fmtInt(a.pagos.length)+' pagos · '+fmtInt(a.vuelos.length)+' vuelos</b></td><td class="r"><b>'+aluTotales(a).map(function(t){ return t[1]; }).join('<br>')+'</b></td><td></td><td class="r '+cls(a.saldo)+'"><b>'+hs(a.saldo)+'</b></td>'+(a.hasSim ? '<td class="r '+cls(a.saldoSim)+'"><b>'+hs(a.saldoSim)+'</b></td>' : '')+'</tr>' +
       '</tbody></table></div>' +
-      '<p class="sub" style="margin:8px 0 0">El saldo arranca en 0 el '+fecha4(aluDesde())+' (fecha «Desde» de la pestaña «Saldo horas» de la planilla): lo anterior no se toma porque la carga no era completa. Cada pago suma las horas que abonó y cada vuelo o sesión de simulador resta lo que voló. El saldo general mezcla aviones; el de cada avión está arriba.</p>';
+      '<p class="sub" style="margin:8px 0 0">El saldo arranca en 0 el '+fecha4(aluDesde())+' (fecha «Desde» de la pestaña «Saldo horas» de la planilla): lo anterior no se toma porque la carga no era completa. Cada pago suma las horas que abonó y cada vuelo o sesión de simulador resta lo que voló. El saldo de aviones junta Cessna y Bristell; el de cada avión está arriba. El simulador va en su propia columna.</p>';
   }
   function aluArchivo(a, ext){
     var n = new Date();
@@ -997,29 +999,30 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
   function aluExcel(a){
     var hoy = new Date(), filas = [
       [{ v: "Génesis Aviación · Cuenta de horas de " + a.nombre, s: 5 }],
-      ["Desde el " + fecha4(aluDesde()) + " · generado el " + fecha4(hoy) + " · " + a.pagos.length + " pagos · " + a.vuelos.length + " vuelos · saldo " + hs(a.saldo) + " h"],
+      ["Desde el " + fecha4(aluDesde()) + " · generado el " + fecha4(hoy) + " · " + a.pagos.length + " pagos · " + a.vuelos.length + " vuelos · saldo aviones " + hs(a.saldo) + " h" + (a.hasSim ? " · saldo simulador " + hs(a.saldoSim) + " h" : "")],
       [],
-      ["Fecha", "Movimiento", "Avión", "Detalle", "Moneda", "Monto", "Horas pagas / inicial", "Horas voladas", "Saldo (h)"].map(function(t){ return { v: t, s: 6 }; })
+      ["Fecha", "Movimiento", "Avión", "Detalle", "Moneda", "Monto", "Horas pagas / inicial", "Horas voladas", "Saldo aviones (h)", "Saldo simulador (h)"].map(function(t){ return { v: t, s: 6 }; })
     ];
     var ini = filas.length + 1;
     a.L.forEach(function(e, i){
       var r = filas.length + 1, pago = e.tipo === "Pago", vuelo = e.tipo === "Vuelo";
       filas.push([{ d: e.date }, e.tipo, e.ac, e.det, pago ? e.cur : "", pago ? { v: e.amt, s: 7 } : "", !vuelo && e.h ? { v: e.h, s: 3 } : "", vuelo ? { v: -e.h, s: 3 } : "",
-        { f: (i ? "I" + (r - 1) : "0") + "+G" + r + "-H" + r, v: Math.round(e.saldo * 100) / 100, s: 3 }]);
+        { f: (i ? "I" + (r - 1) : "0") + (e.sim ? "" : "+G" + r + "-H" + r), v: Math.round(e.saldo * 100) / 100, s: 3 },
+        { f: (i ? "J" + (r - 1) : "0") + (e.sim ? "+G" + r + "-H" + r : ""), v: Math.round(e.saldoSim * 100) / 100, s: 3 }]);
     });
     var fin = filas.length;
     filas.push([{ v: "Total", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: a.pagos.length + " pagos · " + a.vuelos.length + " vuelos" + (a.ini.length ? " · saldo inicial" : ""), s: 1 }, { v: "", s: 1 }, { v: "", s: 1 },
-      { f: "SUM(G" + ini + ":G" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.tipo !== "Vuelo" ? e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "SUM(H" + ini + ":H" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.tipo === "Vuelo" ? -e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "G" + (fin + 1) + "-H" + (fin + 1), v: Math.round(a.saldo * 100) / 100, s: 4 }]);
+      { f: "SUM(G" + ini + ":G" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.tipo !== "Vuelo" ? e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "SUM(H" + ini + ":H" + fin + ")", v: Math.round(a.L.reduce(function(t, e){ return t + (e.tipo === "Vuelo" ? -e.h : 0); }, 0) * 100) / 100, s: 4 }, { f: "I" + fin, v: Math.round(a.saldo * 100) / 100, s: 4 }, { f: "J" + fin, v: Math.round(a.saldoSim * 100) / 100, s: 4 }]);
     filas.push([]);
     ["ARS", "USD"].forEach(function(c){ if (a.tot[c]) filas.push([{ v: "Total pagado en " + (c === "ARS" ? "pesos" : "dólares"), s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: "", s: 1 }, { v: c, s: 1 }, { v: a.tot[c], s: 8 }]); });
     var gs = aluGrupos(a);
     if (gs.length){ filas.push([]); filas.push(["Avión", "Saldo inicial", "Horas pagas", "Horas voladas", "Saldo (h)"].map(function(t){ return { v: t, s: 6 }; }));
       gs.forEach(function(g){ filas.push([g[0], { v: Math.round(g[4] * 100) / 100, s: 3 }, { v: Math.round(g[1] * 100) / 100, s: 3 }, { v: Math.round(g[2] * 100) / 100, s: 3 }, { v: Math.round(g[3] * 100) / 100, s: 3 }]); }); }
-    return xlsx("Cuenta de horas", filas, [12, 12, 11, 34, 8, 13, 12, 13, 11], 4);
+    return xlsx("Cuenta de horas", filas, [12, 12, 11, 34, 8, 13, 12, 13, 13, 13], 4);
   }
   function aluPdf(a){
     var W = 595.28, H = 841.89, M = 40, hoy = new Date();
-    var cols = [["Fecha", 56], ["Mov.", 36], ["Avión", 52], ["Detalle", 168], ["Monto", 82, "r"], ["Horas", 56, "r"], ["Saldo (h)", 65, "r"]];
+    var cols = [["Fecha", 56], ["Mov.", 36], ["Avión", 52], ["Detalle", 140], ["Monto", 80, "r"], ["Horas", 46, "r"], ["Saldo avión", 52, "r"], ["Saldo sim.", 53, "r"]];
     function e2(s){ return pdfTxt(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"); }
     function txt(x, y, s, size, bold, color){ return (color || "0 0 0") + " rg BT /" + (bold ? "F2" : "F1") + " " + size + " Tf " + x.toFixed(2) + " " + y.toFixed(2) + " Td (" + e2(s) + ") Tj ET\n"; }
     function txtR(x, y, s, size, bold, color){ return txt(x - anchoTxt(s, size, bold), y, s, size, bold, color); }
@@ -1038,8 +1041,8 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
         c += txt(M, y - 4, "Génesis Aviación", 10, true, "0.769 0.071 0.188"); y -= 26;
         c += txt(M, y, "Cuenta de horas de " + a.nombre, 17, true); y -= 18;
         c += txt(M, y, "Desde el " + fecha4(aluDesde()) + "  ·  generado el " + fecha4(hoy) + "  ·  " + a.pagos.length + " pagos  ·  " + a.vuelos.length + " vuelos", 9, false, "0.35 0.35 0.35"); y -= 22;
-        var res = aluTotales(a).map(function(t){ return [t[0], t[1], "0 0 0"]; }).concat([["Saldo de horas", hsP(a.saldo) + " h", col(a.saldo)]],
-          aluGrupos(a).map(function(g){ return [g[0] + " (" + (g[4] ? "inicial " + hsP(g[4]) + " / " : "") + h1(g[1]) + " pagas / " + h1(g[2]) + " voladas)", hsP(g[3]) + " h", col(g[3])]; })), x = M;
+        var res = aluTotales(a).map(function(t){ return [t[0], t[1], "0 0 0"]; }).concat([["Saldo aviones", hsP(a.saldo) + " h", col(a.saldo)]], a.hasSim ? [["Saldo simulador", hsP(a.saldoSim) + " h", col(a.saldoSim)]] : [],
+          aluGrupos(a).filter(function(g){ return !/^sim/i.test(g[0]); }).map(function(g){ return [g[0] + " (" + (g[4] ? "inicial " + hsP(g[4]) + " / " : "") + h1(g[1]) + " pagas / " + h1(g[2]) + " voladas)", hsP(g[3]) + " h", col(g[3])]; })), x = M;
         res.forEach(function(r){
           var w = Math.max(70, anchoTxt(r[0].toUpperCase(), 7) + 18, anchoTxt(r[1], 13, true) + 18);
           if (x + w > W - M){ x = M; y -= 36; }
@@ -1057,14 +1060,15 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       if (y < M + 30) nuevaPagina(false);
       var pago = e.tipo === "Pago";
       if (pago) c += "0.96 0.955 0.94 rg " + M + " " + (y - 5).toFixed(2) + " " + (W - 2 * M) + " " + fila + " re f\n";
-      c += celdas(y, [fecha4(e.date), e.tipo, e.ac, e.det, pago ? monto(e.cur, e.amt) : "", e.h ? hsP(e.h) : "-", hsP(e.saldo)], 8, false,
-        [0, 0, 0, 0, 0, pago && e.h ? col(1) : e.tipo === "Inicial" ? col(e.h) : 0, col(e.saldo)]);
+      c += celdas(y, [fecha4(e.date), e.tipo, e.ac, e.det, pago ? monto(e.cur, e.amt) : "", e.h ? hsP(e.h) : "-", e.sim ? "" : hsP(e.saldo), e.sim ? hsP(e.saldoSim) : ""], 8, false,
+        [0, 0, 0, 0, 0, pago && e.h ? col(1) : e.tipo === "Inicial" ? col(e.h) : 0, col(e.saldo), col(e.saldoSim)]);
       c += linea(M, y - 5, W - M, y - 5, "0.88"); y -= fila;
     });
     var tots = aluTotales(a);
-    if (y < M + 34 + tots.length * 14) nuevaPagina(false);
+    if (y < M + 50 + tots.length * 14) nuevaPagina(false);
     c += linea(M, y + 9, W - M, y + 9, "0.3");
-    c += txt(M + 2, y - 2, "Saldo final de horas", 9, true) + txtR(W - M - 4, y - 2, hsP(a.saldo) + " h", 9, true, col(a.saldo)); y -= 16;
+    c += txt(M + 2, y - 2, "Saldo final aviones", 9, true) + txtR(W - M - 4, y - 2, hsP(a.saldo) + " h", 9, true, col(a.saldo)); y -= 16;
+    if (a.hasSim){ c += txt(M + 2, y - 2, "Saldo final simulador", 9, true) + txtR(W - M - 4, y - 2, hsP(a.saldoSim) + " h", 9, true, col(a.saldoSim)); y -= 16; }
     tots.forEach(function(t){ c += txt(M + 2, y - 2, t[0], 9, false) + txtR(W - M - 4, y - 2, t[1], 9, true); y -= 14; });
     paginas.push(c);
     paginas = paginas.map(function(p, i){ return p + txtR(W - M, 24, "Página " + (i + 1) + " de " + paginas.length, 8, false, "0.5 0.5 0.5") + txt(M, 24, "Pagos (Ingresos) y vuelos (Vuelo y Simulador) · Génesis Aviación", 8, false, "0.5 0.5 0.5"); });
