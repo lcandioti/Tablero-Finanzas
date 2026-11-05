@@ -959,7 +959,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       var L = a.pagos.map(function(m){ var h = m.hours > 0 && m.hours <= 150 ? m.hours : 0;
         return { date: m.date, tipo: "Pago", ac: m.ac, g: grupo(m.ac), det: m.cat + " · " + m.forma, cur: m.cur, amt: m.amt, h: h }; })
         .concat(a.ini.map(function(x){ var mat = x.g === "SIM" ? "SIM" : x.g === "C150" ? "IQB" : x.g;
-          return { date: desde, tipo: "Inicial", ac: x.g === "SIM" ? "Simulador" : x.g, g: grupo(mat), det: x.nota || "Saldo inicial cargado a mano", cur: "", amt: 0, h: x.h }; }))
+          return { date: desde, tipo: "Inicial", ac: x.g === "SIM" ? "Simulador" : x.g, g: grupo(mat), det: x.h >= 0 ? "Horas a favor de 2025" : "Horas adeudadas de 2025", cur: "", amt: 0, h: x.h }; }))
         .concat(a.vuelos.map(function(v){ return { date: v.date, tipo: "Vuelo", ac: v.ac, g: grupo(v.ac), det: (v.inst && !/^(n\/?a|-)$/i.test(v.inst) ? v.inst : "Sin instructor") + (v.fin ? " · " + v.fin : ""), cur: "", amt: 0, h: -v.h }; }));
       var ORD = { Inicial: 0, Pago: 1, Vuelo: 2 };
       L.sort(function(x, y){ return x.date - y.date || ORD[x.tipo] - ORD[y.tipo]; });
