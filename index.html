@@ -937,15 +937,21 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
       var a = A[k] || (A[k] = { k: k, var: {}, pagos: [], vuelos: [], ini: [], tot: { ARS: 0, USD: 0 } });
       a.var[x[0]] = (a.var[x[0]] || 0) + 0.1; a.ini.push({ g: x[1], h: Number(x[2]), nota: x[3] || "" });
     });
-    // Solo se arma la cuenta de quienes tienen pagos registrados
+    // También entra quien voló desde esa fecha aunque no tenga pagos (como en la tabla de saldos)
+    function cuenta(n){
+      var k = key(n); if (!k || /^sin nombre$/.test(k)) return null;
+      var a = A[k] || (A[k] = { k: k, var: {}, pagos: [], vuelos: [], ini: [], tot: { ARS: 0, USD: 0 } });
+      var nm = clean(n); a.var[nm] = (a.var[nm] || 0) + 0.01; return a;
+    }
     vu.forEach(function(v){
-      var a = A[key(v[1])]; if (!a) return;
       var d = parseDate(v[0]), h = parseHours(v[6]); if (!d || d < desde || !(h > 0 && h <= 24)) return;
-      a.vuelos.push({ date: d, ac: String(v[7] || "").toUpperCase() || "Sin avión", inst: clean(v[3]), fin: clean(v[2]).toUpperCase(), h: h });
+      var ac = String(v[7] || "").toUpperCase(); if (!/^(IQB|FPJ|S091)$/.test(ac) && !A[key(v[1])]) return;
+      var a = cuenta(v[1]); if (!a) return;
+      a.vuelos.push({ date: d, ac: ac || "Sin avión", inst: clean(v[3]), fin: clean(v[2]).toUpperCase(), h: h });
     });
     sim.forEach(function(s){
-      var a = A[key(s[1])]; if (!a) return;
       var d = parseDate(s[0]), h = parseHours(s[4]); if (!d || d < desde || !(h > 0 && h <= 12)) return;
+      var a = cuenta(s[1]); if (!a) return;
       a.vuelos.push({ date: d, ac: "Simulador", inst: clean(s[3]), fin: clean(s[2]).toUpperCase(), h: h });
     });
     Object.keys(A).forEach(function(k){
@@ -987,7 +993,7 @@ tr.tot td{border-top:1px solid var(--axis);border-bottom:none}
     var ix = state.aluIdx || aluIndex(), A = ix.A;
     var keys = Object.keys(A).sort(function(x, y){ return A[x].nombre.localeCompare(A[y].nombre, "es"); });
     if (state.alu && !A[state.alu]) state.alu = "";
-    $("f-alu").innerHTML = '<option value="">Elegí un alumno…</option>' + keys.map(function(k){ return '<option value="'+esc(k)+'"'+(k === state.alu ? ' selected' : '')+'>'+esc(A[k].nombre)+'</option>'; }).join("");
+    $("f-alu").innerHTML = '<option value="">Elegí un alumno…</option>' + keys.map(function(k){ return '<option value="'+esc(k)+'"'+(k === state.alu ? ' selected' : '')+'>'+esc(A[k].nombre)+(A[k].pagos.length ? '' : ' · sin pagos')+'</option>'; }).join("");
     var a = A[state.alu];
     $("alu-xls").disabled = $("alu-pdf").disabled = !a;
     var aviso = !state.vu ? (state.vuErr ? '<p class="sub" style="margin:6px 0 0;color:var(--down)">No se pudieron leer los vuelos ('+esc(state.vuErr)+'). Se muestran solo los pagos.</p>' : '<p class="sub" style="margin:6px 0 0">Cargando vuelos…</p>') : '';
